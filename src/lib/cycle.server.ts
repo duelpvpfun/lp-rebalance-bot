@@ -180,46 +180,102 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
 
   await new Promise((r) => setTimeout(r, 4000));
 
-  // STEP 3: LP with retry-on-shrink
+  // STEP 3: LP via PumpSwap SDK with retry-on-shrink
   try {
     const tokenAvail = await getTokenUiBalance(conn, pubkey, mint);
     const usdcAvail = await getTokenUiBalance(conn, pubkey, USDC_MINT);
     if (tokenAvail <= 0) throw new Error("no token balance to LP");
     if (usdcAvail <= 0) throw new Error("no USDC balance to LP");
 
-    const tokenRaw = BigInt(Math.floor(tokenAvail * 10 ** tokenDecimals)).toString();
-    const usdcNeededRaw = await priceTokenInUsdc(mint, tokenRaw);
-    const usdcNeededUi = usdcNeededRaw / 1e6;
+    const mintPk = new PublicKey(mint);
+    const usdcPk = new PublicKey(USDC_MINT);
+    const userPk = signer.publicKey;
 
-    let depositTokenUi = tokenAvail;
-    if (usdcNeededUi > usdcAvail) {
-      depositTokenUi = tokenAvail * ((usdcAvail * 0.98) / usdcNeededUi);
+    // Resolve canonical PumpSwap pool for this USDC-quoted mint.
+    const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
+    const onlineSdk = new OnlinePumpAmmSdk(conn);
+    const offlineSdk = new PumpAmmSdk();
+    const liqState = await onlineSdk.liquiditySolanaState(poolPk, userPk);
+
+    // Verify base/quote ordering. If mint is the quote (unlikely on pump.fun
+    // USDC pools but defensive), abort cleanly.
+    if (!liqState.pool.baseMint.equals(mintPk)) {
+      throw new Error(
+        `pool base mint mismatch: pool.base=${liqState.pool.baseMint.toBase58()} expected=${mint}`,
+      );
     }
+    const usdcDecimals = 6;
+    let depositTokenUi = tokenAvail;
 
     let lastErr = "";
     for (let attempt = 0; attempt < MAX_LP_RETRIES; attempt++) {
       try {
-        const txBuf = await pumpPortalLocal({
-          publicKey: pubkey,
-          action: "depositLiquidity",
-          mint,
-          amount: depositTokenUi,
-          denominatedInSol: "false",
-          slippage: POOL_SLIPPAGE_PCT,
-          priorityFee: PRIORITY_FEE_SOL,
-          pool: "pump-amm",
-        });
-        const sig = await signAndSend(conn, signer, txBuf);
+        const baseRaw = new BN(
+          BigInt(Math.floor(depositTokenUi * 10 ** tokenDecimals)).toString(),
+        );
+        // Ask the SDK what USDC + LP tokens this base amount maps to right now.
+        const auto = offlineSdk.depositAutocompleteQuoteAndLpTokenFromBase(
+          liqState,
+          baseRaw,
+          POOL_SLIPPAGE_PCT,
+        );
+        const usdcNeededUi = Number(auto.quote.toString()) / 10 ** usdcDecimals;
+
+        // If we don't have enough USDC, shrink token side to fit (leave 2% buffer).
+        if (usdcNeededUi > usdcAvail) {
+          const ratio = (usdcAvail * 0.98) / usdcNeededUi;
+          depositTokenUi *= ratio;
+          throw new Error(
+            `insufficient USDC: need ${usdcNeededUi.toFixed(4)} have ${usdcAvail.toFixed(4)} -> shrink token to ${depositTokenUi}`,
+          );
+        }
+
+        const lpIxs: TransactionInstruction[] = await offlineSdk.depositInstructions(
+          liqState,
+          auto.lpToken,
+          POOL_SLIPPAGE_PCT,
+        );
+
+        const ixs: TransactionInstruction[] = [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
+          ComputeBudgetProgram.setComputeUnitPrice({
+            microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 600_000),
+          }),
+          ...lpIxs,
+        ];
+
+        const latest = await conn.getLatestBlockhash();
+        const msg = new TransactionMessage({
+          payerKey: userPk,
+          recentBlockhash: latest.blockhash,
+          instructions: ixs,
+        }).compileToV0Message();
+        const tx = new VersionedTransaction(msg);
+        tx.sign([signer]);
+        const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
+        await conn.confirmTransaction(
+          {
+            signature: sig,
+            blockhash: latest.blockhash,
+            lastValidBlockHeight: latest.lastValidBlockHeight,
+          },
+          "confirmed",
+        );
         steps.push({
           step: "addLiquidity",
           ok: true,
           signature: sig,
-          info: { tokenDeposited: depositTokenUi, attempt: attempt + 1 },
+          info: {
+            tokenDeposited: depositTokenUi,
+            usdcDeposited: usdcNeededUi,
+            attempt: attempt + 1,
+          },
         });
         return { ok: true, steps };
       } catch (e) {
         lastErr = (e as Error).message;
-        depositTokenUi *= LP_SHRINK_FACTOR;
+        // Default shrink in case it wasn't a ratio issue.
+        if (!lastErr.includes("insufficient USDC")) depositTokenUi *= LP_SHRINK_FACTOR;
         steps.push({
           step: `addLiquidity_retry_${attempt + 1}`,
           ok: false,
