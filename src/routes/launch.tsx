@@ -488,53 +488,87 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
   async function onSignFunding() {
     if (!prepare || !publicKey || !signTransaction) return;
+    let stage = "init";
     try {
       setPhase("signing");
-      // Worker builds the transaction (reliable Buffer + spl-token server-side).
-      const { transaction: b64 } = await fetchFundingTx({
+
+      stage = "fetch-funding-tx";
+      const ftx = await fetchFundingTx({
         payer: publicKey.toBase58(),
         devWallet: prepare.devWallet,
         usdc: prepare.fund.usdc,
         sol: prepare.fund.sol,
       });
-      // Decode base64 WITHOUT Buffer (browser-safe): atob -> Uint8Array.
+      const b64 = ftx?.transaction;
+      if (!b64 || typeof b64 !== "string") {
+        throw new Error(
+          `Worker returned no transaction. Got keys: ${Object.keys(ftx ?? {}).join(",") || "none"}`,
+        );
+      }
+
+      stage = "decode-base64";
       const binary = atob(b64);
       const raw = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
 
-      // Ensure Buffer exists globally before web3.js touches it internally.
+      stage = "install-buffer";
       if (typeof (globalThis as any).Buffer?.from !== "function") {
         const mod: any = await import("buffer");
         const BufferCtor = mod.Buffer ?? mod.default?.Buffer;
+        if (!BufferCtor?.from) throw new Error("Buffer polyfill load failed");
         (globalThis as any).Buffer = BufferCtor;
         (window as any).Buffer = BufferCtor;
       }
 
-      const web3 = await loadWeb3();
-      const { Transaction, VersionedTransaction } = web3;
+      stage = "load-web3";
+      const web3: any = await loadWeb3();
+      const Transaction = web3?.Transaction;
+      const VersionedTransaction = web3?.VersionedTransaction;
+      if (!Transaction || !VersionedTransaction) {
+        throw new Error(
+          `@solana/web3.js missing exports: Transaction=${!!Transaction} VersionedTransaction=${!!VersionedTransaction}`,
+        );
+      }
 
-      // Try versioned first (v0 messages), then fall back to legacy.
+      stage = "deserialize-tx";
       let tx: any;
       try {
         tx = VersionedTransaction.deserialize(raw);
-      } catch {
-        tx = Transaction.from(raw);
+      } catch (e1) {
+        try {
+          tx = Transaction.from(raw);
+        } catch (e2: any) {
+          throw new Error(
+            `Could not parse tx (v0: ${(e1 as any)?.message}; legacy: ${e2?.message})`,
+          );
+        }
       }
-      const signed = await signTransaction(tx);
-      const connection = await getConnection();
-      const sig = await connection.sendRawTransaction(signed.serialize());
 
+      stage = "sign-tx";
+      const signed = await signTransaction(tx);
+
+      stage = "open-connection";
+      const connection = await getConnection();
+
+      stage = "send-tx";
+      const serialized = signed.serialize();
+      const sig = await connection.sendRawTransaction(serialized);
       setFundSig(sig);
       toast.success("Funding tx sent");
+
+      stage = "confirm-tx";
       await connection.confirmTransaction(sig, "confirmed");
       setPhase("polling");
       pollStatus(prepare.pendingId);
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err?.message ?? "Sign/send failed");
+      console.error(`[onSignFunding] failed at stage=${stage}`, err);
+      setErrorMsg(`${stage}: ${err?.message ?? String(err) ?? "Sign/send failed"}`);
       setPhase("error");
     }
   }
+
+
+
 
 
   async function pollStatus(pendingId: string) {
