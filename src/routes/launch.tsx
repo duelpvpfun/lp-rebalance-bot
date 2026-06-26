@@ -519,55 +519,23 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
             ) : (
               <>
                 <Section title="Auto-LP rules">
-                  <Field
-                    label="Buyback %"
-                    hint="Share of remaining USDC swapped back into your token before redepositing LP. 35% keeps LP perfectly paired."
-                  >
-                    <NumberSuffix
-                      value={form.buyback_pct}
-                      onChange={(v) => update("buyback_pct", v)}
-                      suffix="%"
-                      min={5}
-                      max={95}
-                    />
+                  <div className="md:col-span-2 mb-1 flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[11px] text-accent">
+                    <Lock className="h-3 w-3" /> these defaults are locked while the launchpad is in beta — every coin runs the exact same loop.
+                  </div>
+                  <Field label="Buyback %" hint="Locked at 35% during beta — keeps LP perfectly paired.">
+                    <NumberSuffix value={form.buyback_pct} onChange={() => {}} suffix="%" disabled />
                   </Field>
-                  <Field
-                    label="Treasury fee %"
-                    hint="Cut taken off the claimed USDC every cycle, sent to the Liquititty treasury."
-                  >
-                    <NumberSuffix
-                      value={form.treasury_fee_pct}
-                      onChange={(v) => update("treasury_fee_pct", v)}
-                      suffix="%"
-                      min={0}
-                      max={50}
-                    />
+                  <Field label="Treasury fee %" hint="Locked at 10% during beta — funds the platform.">
+                    <NumberSuffix value={form.treasury_fee_pct} onChange={() => {}} suffix="%" disabled />
                   </Field>
-                  <Field
-                    label="Cycle interval"
-                    hint="How often the bot fires: claim → buy → LP → burn. Default 180s (3 min)."
-                  >
-                    <NumberSuffix
-                      value={form.cycle_interval_seconds}
-                      onChange={(v) => update("cycle_interval_seconds", v)}
-                      suffix="s"
-                      min={60}
-                      step={30}
-                    />
+                  <Field label="Cycle interval" hint="Locked at 180s (3 min) during beta.">
+                    <NumberSuffix value={form.cycle_interval_seconds} onChange={() => {}} suffix="s" disabled />
                   </Field>
-                  <Field
-                    label="Min claimable USDC"
-                    hint="Skip the cycle if claimable fees are below this — avoids burning gas on dust."
-                  >
-                    <NumberSuffix
-                      value={form.min_claim_usdc}
-                      onChange={(v) => update("min_claim_usdc", v)}
-                      suffix="USDC"
-                      min={0}
-                      step={0.1}
-                    />
+                  <Field label="Min claimable USDC" hint="Locked at 1 USDC during beta — avoids burning gas on dust.">
+                    <NumberSuffix value={form.min_claim_usdc} onChange={() => {}} suffix="USDC" disabled />
                   </Field>
                 </Section>
+
 
                 <Section title="Deployment">
                   <Field
@@ -703,6 +671,7 @@ function NumberSuffix({
   min,
   max,
   step,
+  disabled,
 }: {
   value: number;
   onChange: (v: number) => void;
@@ -710,6 +679,7 @@ function NumberSuffix({
   min?: number;
   max?: number;
   step?: number;
+  disabled?: boolean;
 }) {
   return (
     <div className="relative mt-1">
@@ -719,17 +689,24 @@ function NumberSuffix({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={cls + " mt-0 pr-14"}
+        className={cls + " mt-0 pr-14 disabled:cursor-not-allowed disabled:opacity-50"}
       />
       {suffix && (
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] font-semibold text-muted-foreground">
           {suffix}
         </span>
       )}
+      {disabled && (
+        <span className="pointer-events-none absolute inset-y-0 right-10 flex items-center text-muted-foreground/80">
+          <Lock className="h-3 w-3" />
+        </span>
+      )}
     </div>
   );
 }
+
 
 function ImageDrop({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
