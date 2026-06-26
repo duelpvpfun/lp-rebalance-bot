@@ -315,7 +315,7 @@ const PHASE_LABEL: Record<string, string> = {
   burn: "4/4 · Burning LP tokens (locking liquidity)",
 };
 
-const CYCLE_INTERVAL_SEC = 120;
+const CYCLE_INTERVAL_SEC = 60;
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
