@@ -4,9 +4,8 @@ import { cycleStatus } from "@/lib/cycle.server";
 /**
  * Status-only endpoint for the website timer.
  *
- * tick() is NEVER triggered from here — neither GET nor POST. The cycle is
- * driven exclusively by the in-process scheduler started in src/start.ts.
- * This prevents website visitors (or external pings) from spamming claims/buys.
+ * tick() is NEVER triggered from here — neither GET nor POST. This endpoint is
+ * read-only so website visitors (or external pings) cannot spam claims/buys.
  */
 const CORS = {
   "Access-Control-Allow-Origin": "*",
