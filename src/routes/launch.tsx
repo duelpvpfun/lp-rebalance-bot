@@ -1,8 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Users, Rocket, Search, ArrowLeft, Upload, X, Info, Loader2, Sparkles } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Users, Rocket, Search, ArrowLeft, Upload, X, Info, Loader2, Sparkles, Lock } from "lucide-react";
 import { toast } from "sonner";
 import logo from "@/assets/liquititty-logo.webp";
+import { getStats } from "@/lib/stats.functions";
+
 import {
   Dialog,
   DialogContent,
