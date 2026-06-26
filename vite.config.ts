@@ -87,6 +87,14 @@ export default defineConfig({
     resolve: {
       alias: { ...sharedAlias },
     },
+    environments: {
+      ssr: {
+        resolve: { alias: { buffer: "node:buffer" } },
+      },
+      nitro: {
+        resolve: { alias: { buffer: "node:buffer" } },
+      },
+    },
     ssr: {
       noExternal: [
         "@coral-xyz/anchor",
