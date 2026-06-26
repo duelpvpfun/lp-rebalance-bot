@@ -1,4 +1,3 @@
-import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 // Pump SDKs are heavy and pull in @solana/kit which mismatches with other
@@ -380,7 +379,7 @@ const STATS_STALE_GRACE_MS = 10 * 60_000; // serve stale up to 10 min if upstrea
 let statsCache: { at: number; payload: StatsPayload } | null = null;
 let statsInflight: Promise<StatsPayload> | null = null;
 
-async function computeStats(): Promise<StatsPayload> {
+export async function computeStats(): Promise<StatsPayload> {
   const mint = process.env.TOKEN_MINT_ADDRESS;
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const devWallet = loadPubkey();
@@ -406,34 +405,32 @@ async function computeStats(): Promise<StatsPayload> {
   return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60, cycleRuntime };
 }
 
-export const getStats = createServerFn({ method: "GET" }).handler(
-  async (): Promise<StatsPayload> => {
-    const now = Date.now();
-    if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS) {
+export async function getCachedStats(): Promise<StatsPayload> {
+  const now = Date.now();
+  if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS) {
+    return statsCache.payload;
+  }
+  if (statsInflight) {
+    // Don't make extra visitors wait on the upstream fan-out — hand them the
+    // last known good payload while the single in-flight refresh runs.
+    if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS + STATS_STALE_GRACE_MS) {
       return statsCache.payload;
     }
-    if (statsInflight) {
-      // Don't make extra visitors wait on the upstream fan-out — hand them the
-      // last known good payload while the single in-flight refresh runs.
-      if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS + STATS_STALE_GRACE_MS) {
-        return statsCache.payload;
-      }
-      return statsInflight;
+    return statsInflight;
+  }
+  statsInflight = (async () => {
+    try {
+      const payload = await computeStats();
+      statsCache = { at: Date.now(), payload };
+      return payload;
+    } catch (err) {
+      if (statsCache) return statsCache.payload;
+      throw err;
+    } finally {
+      statsInflight = null;
     }
-    statsInflight = (async () => {
-      try {
-        const payload = await computeStats();
-        statsCache = { at: Date.now(), payload };
-        return payload;
-      } catch (err) {
-        if (statsCache) return statsCache.payload;
-        throw err;
-      } finally {
-        statsInflight = null;
-      }
-    })();
-    // First-ever request: must await. Subsequent requests within TTL use cache above.
-    if (!statsCache) return statsInflight;
-    return statsCache.payload;
-  },
-);
+  })();
+  // First-ever request: must await. Subsequent requests within TTL use cache above.
+  if (!statsCache) return statsInflight;
+  return statsCache.payload;
+}

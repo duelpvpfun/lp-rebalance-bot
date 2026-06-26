@@ -1,6 +1,4 @@
-import bufferModule from "buffer/";
-
-const { Buffer } = bufferModule;
+import { Buffer } from "buffer";
 
 const globalScope = globalThis as any;
 

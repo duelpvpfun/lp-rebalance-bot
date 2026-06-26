@@ -60,12 +60,13 @@ function solanaServerAliasPlugin(): Plugin {
 }
 
 function browserBufferAliasPlugin(): Plugin {
+  const bufferEntry = path.resolve(__dirname, "node_modules/buffer/index.js");
   return {
     name: "browser-buffer-alias",
     enforce: "pre",
     resolveId(source) {
       if (this.environment?.name !== "client") return null;
-      if (source === "buffer") return this.resolve("buffer/", undefined, { skipSelf: true });
+      if (source === "buffer" || source === "buffer/") return bufferEntry;
       return null;
     },
   };
