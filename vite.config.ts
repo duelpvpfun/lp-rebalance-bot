@@ -1,14 +1,15 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import path from "node:path";
+import fs from "node:fs";
 import type { Plugin } from "vite";
 
 // Some @solana/* v2 packages only declare `browser`/`node` export conditions
-// (no `workerd`/`default`). The workerd/server build can't pick a file and
-// errors out. Resolve them to their browser ESM bundle ONLY for non-client
-// environments. The client build keeps natural nested-node_modules resolution
-// so the kit chain finds its v6 codecs/errors while the spl-token chain still
-// gets v2.
-const V2_BROWSER_FALLBACK = [
+// (no `workerd`/`default`), and the workerd build can't pick a file. The v6
+// kit chain DOES declare `workerd` and must resolve to its own nested copies.
+// We walk node_modules from the importer up; if the nearest copy of the
+// requested package is a v2 (no workerd export), we redirect to the v2
+// browser ESM bundle. v6 packages are left to natural resolution.
+const SOLANA_PKGS = new Set([
   "codecs",
   "codecs-core",
   "codecs-data-structures",
@@ -16,22 +17,44 @@ const V2_BROWSER_FALLBACK = [
   "codecs-strings",
   "errors",
   "options",
-];
+]);
+
+function findNearestPkg(fromDir: string, pkgName: string): string | null {
+  let dir = fromDir;
+  // walk up until filesystem root
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const candidate = path.join(dir, "node_modules", pkgName);
+    if (fs.existsSync(path.join(candidate, "package.json"))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
 
 function solanaServerAliasPlugin(): Plugin {
-  const map = new Map(
-    V2_BROWSER_FALLBACK.map((p) => [
-      `@solana/${p}`,
-      path.resolve(__dirname, `node_modules/@solana/${p}/dist/index.browser.mjs`),
-    ]),
-  );
   return {
-    name: "solana-server-alias",
+    name: "solana-workerd-v2-fallback",
     enforce: "pre",
-    resolveId(source) {
+    resolveId(source, importer) {
       if (this.environment?.name === "client") return null;
-      const hit = map.get(source);
-      return hit ?? null;
+      if (!source.startsWith("@solana/")) return null;
+      const sub = source.slice("@solana/".length);
+      if (!SOLANA_PKGS.has(sub)) return null;
+      const fromDir = importer ? path.dirname(importer) : __dirname;
+      const pkgDir = findNearestPkg(fromDir, source) ?? path.join(__dirname, "node_modules", source);
+      try {
+        const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+        const exp = pj.exports;
+        const root = exp && typeof exp === "object" ? exp["."] ?? exp : null;
+        const hasWorkerd = root && typeof root === "object" && ("workerd" in root || "default" in root);
+        if (hasWorkerd) return null; // resolver can pick a file itself
+        const browserMjs = path.join(pkgDir, "dist/index.browser.mjs");
+        if (fs.existsSync(browserMjs)) return browserMjs;
+      } catch {
+        /* ignore */
+      }
+      return null;
     },
   };
 }
