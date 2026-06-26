@@ -964,15 +964,18 @@ export async function runCycleStep(state?: CycleState): Promise<{
       case "claim": {
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
-        // Absolute anti-spam guard: the moment a claim step starts, mark the
-        // cycle as moving to BUY before any slow RPC/SDK work. If this request
-        // dies anywhere after here, the next tick cannot claim again; it will
-        // buy from the USDC already sitting in the dev wallet instead.
+        // Absolute anti-spam guard: the moment a claim step starts, push the
+        // cooldown 60s into the future AND pre-advance the DB phase to BUY.
+        // Any other isolate that calls tick() inside that window sees
+        // cooldown_until > now and immediately bails without claiming again.
+        const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
+        nextState.cooldownUntilMs = claimGuardCooldown;
         await persistCycleProgress({
           ...nextState,
           phase: "buy",
           claimedUsdc: 0,
           attempts: 0,
+          cooldownUntilMs: claimGuardCooldown,
         });
         const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
           // Pre-advance BEFORE broadcasting claim. If the host dies after this
