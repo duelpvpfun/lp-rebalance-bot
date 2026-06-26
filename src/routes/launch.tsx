@@ -120,35 +120,55 @@ function LaunchPage() {
             👑 king of the hill
           </div>
           <div className="pf-king-aura">
-            <button
-              type="button"
-              onClick={openCreate}
+            <a
+              href={stats?.dex?.pairUrl ?? "#"}
+              target="_blank"
+              rel="noreferrer"
               className="pf-card group flex items-start gap-3 rounded-md p-2.5 text-left"
             >
               <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
-                <img src={logo} alt="" className="h-full w-full object-cover" />
+                <img src={logo} alt="liquititty" className="h-full w-full object-cover" />
               </div>
               <div className="text-xs leading-relaxed">
                 <div className="mb-1 inline-block rounded-sm bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">
-                  example · launch yours
+                  official · auto-LP live
                 </div>
                 <div className="text-muted-foreground">
-                  Created by <span className="font-semibold text-accent">YOU</span>
+                  market cap:{" "}
+                  <span className="font-bold text-accent">
+                    {fmtUsd(stats?.dex?.marketCapUsd)}
+                  </span>
                 </div>
                 <div className="text-muted-foreground">
-                  auto-LP cycle: <span className="font-bold text-foreground">every 3 min</span>
+                  liquidity:{" "}
+                  <span className="font-bold text-foreground">
+                    {fmtUsd(stats?.dex?.liquidityUsd)}
+                  </span>
                 </div>
                 <div className="text-muted-foreground">
-                  burns LP: <span className="font-bold text-accent">forever</span> 🔒
+                  in LP:{" "}
+                  <span className="text-foreground">
+                    {fmtNum(stats?.dex?.liquidityUsdc)} USDC
+                  </span>{" "}
+                  ·{" "}
+                  <span className="text-foreground">
+                    {fmtNum(stats?.dex?.liquidityToken)} $LIQUITITTY
+                  </span>
                 </div>
                 <div className="mt-1 text-sm font-bold text-foreground group-hover:text-accent">
-                  Your Coin Here{" "}
-                  <span className="font-normal text-muted-foreground">(ticker: $TICKER)</span>
+                  Liquititty{" "}
+                  <span className="font-normal text-muted-foreground">(ticker: $LIQUITITTY)</span>
                 </div>
+                {stats?.mint && (
+                  <div className="mt-1 font-mono text-[10px] text-muted-foreground/80">
+                    CA: {stats.mint.slice(0, 6)}…{stats.mint.slice(-6)}
+                  </div>
+                )}
               </div>
-            </button>
+            </a>
           </div>
         </section>
+
 
         {/* SEARCH */}
         <div className="mx-auto mt-10 flex max-w-2xl items-center gap-2">
