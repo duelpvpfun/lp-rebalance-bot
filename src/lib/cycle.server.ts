@@ -1451,6 +1451,22 @@ export async function tick(): Promise<TickResult> {
         secondsUntilNext: Math.max(1, Math.ceil((chainCooldown.cooldownUntilMs - now) / 1000)),
       };
     }
+
+    // If a previous worker died while still showing `claim`, never reclaim the
+    // vault after the lease expires. Treat it as an ended/failed cycle and wait
+    // for the next clean 60s boundary. Duplicate claim txs are worse than a
+    // skipped minute.
+    if (leasedState.cycleStartMs > 0 && now - leasedState.cycleStartMs > 10_000) {
+      const reset = abortCycleState();
+      await persistCycleState(reset);
+      lastKnownPhase = "idle";
+      return {
+        ran: false,
+        reason: "cooldown",
+        phase: "idle",
+        secondsUntilNext: Math.max(1, Math.ceil((reset.cooldownUntilMs - now) / 1000)),
+      };
+    }
   }
 
   if (!atStartOfCycle && now - leasedState.cycleStartMs > STALE_CYCLE_MS) {
