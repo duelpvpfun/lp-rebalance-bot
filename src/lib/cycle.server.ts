@@ -1039,7 +1039,7 @@ async function runCycleStep(state?: CycleState): Promise<{
   const conn = new Connection(rpcUrl(), "confirmed");
 
   const inputState = state ?? freshInMemoryState();
-  const isStartingNewCycle = inputState.cycleStartMs === 0;
+  const isStartingNewCycle = inputState.phase === "claim" && inputState.claimedUsdc <= 0 && inputState.attempts === 0;
   if (isStartingNewCycle) {
     const gated = await hardStartGate(conn, signer);
     if (gated) {
@@ -1403,7 +1403,7 @@ export async function tick(): Promise<TickResult> {
     return { ran: false, reason: locked.cycleStartMs > 0 ? "in_flight" : "cooldown", phase: lastKnownPhase, secondsUntilNext };
   }
 
-  const atStartOfCycle = leasedState.cycleStartMs === 0;
+  const atStartOfCycle = leasedState.phase === "claim" && leasedState.claimedUsdc <= 0 && leasedState.attempts === 0;
 
   if (atStartOfCycle) {
     const signer = loadKeypair();
