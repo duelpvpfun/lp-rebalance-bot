@@ -1418,7 +1418,8 @@ export async function cycleStatus(): Promise<TickStatus> {
   const conn = new Connection(rpcUrl(), "confirmed");
   const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
   const lastCycleAt = typeof lastSigSec === "number" ? lastSigSec : null;
-  const secondsUntilNext = Math.max(0, Math.ceil((state.cooldownUntilMs - now) / 1000));
+  const nextAllowedMs = Math.max(state.cooldownUntilMs, state.claimGuardUntilMs);
+  const secondsUntilNext = Math.max(0, Math.ceil((nextAllowedMs - now) / 1000));
 
   if (active) {
     return { ran: false, reason: "in_flight", phase: state.phase, secondsUntilNext, lastCycleAt };
