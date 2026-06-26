@@ -59,18 +59,6 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
-function browserBufferAliasPlugin(): Plugin {
-  return {
-    name: "browser-buffer-alias",
-    enforce: "pre",
-    resolveId(source) {
-      if (this.environment?.name !== "client") return null;
-      if (source === "buffer") return this.resolve("buffer/", undefined, { skipSelf: true });
-      return null;
-    },
-  };
-}
-
 const sharedAlias = {
   "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
@@ -83,7 +71,7 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [browserBufferAliasPlugin(), solanaServerAliasPlugin()],
+    plugins: [solanaServerAliasPlugin()],
     resolve: {
       alias: { ...sharedAlias },
     },
