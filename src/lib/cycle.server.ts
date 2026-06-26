@@ -111,28 +111,62 @@ async function sendInstructions(
   signer: Keypair,
   ixs: TransactionInstruction[],
 ): Promise<string> {
-  const latest = await conn.getLatestBlockhash();
+  // Prepend priority-fee + compute-limit so the tx actually lands on a busy
+  // network. Without these, Helius/public RPC frequently sees the blockhash
+  // expire ("block height exceeded") before the leader picks the tx up.
+  const hasComputePrice = ixs.some(
+    (ix) => ix.programId.equals(ComputeBudgetProgram.programId) && ix.data[0] === 3,
+  );
+  const hasComputeLimit = ixs.some(
+    (ix) => ix.programId.equals(ComputeBudgetProgram.programId) && ix.data[0] === 2,
+  );
+  const prepend: TransactionInstruction[] = [];
+  if (!hasComputeLimit) {
+    prepend.push(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+  }
+  if (!hasComputePrice) {
+    // ~0.0005 SOL on a 400k CU tx — fine for our small claim/buy/LP txs.
+    prepend.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_250_000 }));
+  }
+  const finalIxs = [...prepend, ...ixs];
+
+  const latest = await conn.getLatestBlockhash("confirmed");
   const msg = new TransactionMessage({
     payerKey: signer.publicKey,
     recentBlockhash: latest.blockhash,
-    instructions: ixs,
+    instructions: finalIxs,
   }).compileToV0Message();
   const tx = new VersionedTransaction(msg);
   tx.sign([signer]);
-  const sig = await conn.sendRawTransaction(tx.serialize(), {
-    skipPreflight: false,
-    maxRetries: 3,
-  });
-  await conn.confirmTransaction(
-    {
-      signature: sig,
-      blockhash: latest.blockhash,
-      lastValidBlockHeight: latest.lastValidBlockHeight,
-    },
-    "confirmed",
+  const raw = tx.serialize();
+
+  // Send with skipPreflight + manual rebroadcast loop until the tx confirms
+  // or the blockhash expires. This is the pattern Helius/Jito recommend for
+  // landing txs reliably on mainnet.
+  const sig = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
+
+  const deadlineMs = Date.now() + 75_000; // ~75s before we give up
+  let lastErr: unknown;
+  while (Date.now() < deadlineMs) {
+    try {
+      const status = await conn.getSignatureStatus(sig, { searchTransactionHistory: false });
+      const s = status?.value;
+      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+        if (s.err) throw new Error(`tx failed: ${JSON.stringify(s.err)}`);
+        return sig;
+      }
+      // not yet — rebroadcast and wait
+      await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
+    } catch (e) {
+      lastErr = e;
+    }
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+  throw new Error(
+    `tx ${sig} did not confirm within 75s${lastErr ? `: ${(lastErr as Error).message}` : ""}`,
   );
-  return sig;
 }
+
 
 async function getTokenDecimals(conn: Connection, mint: string): Promise<number> {
   const info = await conn.getParsedAccountInfo(new PublicKey(mint));
