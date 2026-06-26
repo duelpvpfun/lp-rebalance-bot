@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LaunchRouteImport } from './routes/launch'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
 
+const LaunchRoute = LaunchRouteImport.update({
+  id: '/launch',
+  path: '/launch',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -31,36 +37,52 @@ const ApiPublicRunCycleRoute = ApiPublicRunCycleRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/launch': typeof LaunchRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/launch': typeof LaunchRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/launch': typeof LaunchRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/public/run-cycle' | '/api/public/tick'
+  fullPaths: '/' | '/launch' | '/api/public/run-cycle' | '/api/public/tick'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/public/run-cycle' | '/api/public/tick'
-  id: '__root__' | '/' | '/api/public/run-cycle' | '/api/public/tick'
+  to: '/' | '/launch' | '/api/public/run-cycle' | '/api/public/tick'
+  id:
+    | '__root__'
+    | '/'
+    | '/launch'
+    | '/api/public/run-cycle'
+    | '/api/public/tick'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LaunchRoute: typeof LaunchRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/launch': {
+      id: '/launch'
+      path: '/launch'
+      fullPath: '/launch'
+      preLoaderRoute: typeof LaunchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -87,6 +109,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LaunchRoute: LaunchRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
 }
