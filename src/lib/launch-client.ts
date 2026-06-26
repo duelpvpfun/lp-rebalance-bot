@@ -3,7 +3,7 @@
 // signs, and sends it.
 
 export const WORKER_BASE_PUBLIC =
-  "https://stunning-yodel-r74qvrvjq564cqp5-8787.app.github.dev";
+  "https://liquititty-worker-production.up.railway.app";
 
 export type PrepareResult = {
   pendingId: string;
