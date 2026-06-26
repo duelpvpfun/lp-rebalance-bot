@@ -79,16 +79,13 @@ export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
-  vite: ({ isSsrBuild }) => ({
+  vite: {
     plugins: [solanaServerAliasPlugin(), browserNodePolyfills()],
     define: {
       global: "globalThis",
     },
     resolve: {
-      alias: {
-        ...sharedAlias,
-        ...(isSsrBuild ? { buffer: "node:buffer" } : {}),
-      },
+      alias: { ...sharedAlias },
     },
     ssr: {
       noExternal: [
@@ -102,6 +99,6 @@ export default defineConfig({
     optimizeDeps: {
       include: ["buffer"],
     },
-  }),
+  },
 
 });
