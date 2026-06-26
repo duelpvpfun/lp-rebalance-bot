@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { useSuspenseQuery, queryOptions, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useEffect, useState } from "react";
 import { Users } from "lucide-react";
 import logo from "@/assets/liquititty-logo.webp";
@@ -298,22 +298,21 @@ function useMounted() {
   return m;
 }
 
-const PHASE_LABEL: Record<string, string> = {
-  claim: "1/4 · Claiming USDC creator rewards",
-  buy: "2/4 · Buying 35% back into $LIQUITITTY",
-  lp: "3/4 · Adding TOKEN + USDC to PumpSwap LP",
-  burn: "4/4 · Burning LP tokens (locking liquidity)",
+const PHASE_LABEL: Record<string, { step: string; text: string }> = {
+  claim: { step: "1/4", text: "Claiming USDC rewards" },
+  buy: { step: "2/4", text: "Buying 35% back" },
+  lp: { step: "3/4", text: "Adding to PumpSwap LP" },
+  burn: { step: "4/4", text: "Burning LP tokens" },
 };
 
 const CYCLE_INTERVAL_SEC = 60;
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
+  const qc = useQueryClient();
   const mounted = useMounted();
   const now = useNow(1000);
 
-  // Pure derivation from cached stats — no per-visitor /api/public/tick calls.
-  // pg_cron drives the actual cycle on the backend every minute.
   const lastCycleAt = data.lastCycleAt;
   const cooldownUntil = data.cycleRuntime.cooldownUntil;
   const phase = data.cycleRuntime.phase;
@@ -333,21 +332,36 @@ function NextCycleTimer() {
   const running = mounted && phase !== "idle";
   const elapsed =
     mounted && phaseStartedAt ? Math.max(0, Math.floor((now - phaseStartedAt) / 1000)) : 0;
-  const phaseLabel = running ? PHASE_LABEL[phase] ?? phase : null;
+  const phaseInfo = running ? PHASE_LABEL[phase] ?? { step: "··", text: phase } : null;
   const firing = mounted && !running && remaining === 0;
 
+  // Keep the timer in sync with what the backend is actually doing:
+  // refetch fast while a cycle is running or about to fire.
+  useEffect(() => {
+    if (!mounted) return;
+    if (!running && remaining > 5) return;
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    }, 2500);
+    return () => clearInterval(id);
+  }, [mounted, running, remaining, qc]);
+
   return (
-    <div className="flex min-h-[132px] min-w-[280px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur">
-      <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+    <div className="flex h-[132px] w-[300px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur">
+      <div className="flex h-4 items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
         {(running || firing) && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
-        {running ? "Cycle running" : firing ? "Firing now…" : "Next cycle in"}
+        <span className="truncate">{running ? "Cycle running" : firing ? "Firing now…" : "Next cycle in"}</span>
       </div>
-      <div className="flex h-[56px] items-center justify-center" suppressHydrationWarning>
-        {running ? (
-          <div className="text-center">
-            <div className="font-display text-base leading-tight text-accent">{phaseLabel}</div>
+      <div className="flex h-[56px] items-center justify-center overflow-hidden" suppressHydrationWarning>
+        {running && phaseInfo ? (
+          <div className="w-full text-center">
+            <div className="font-display text-sm leading-tight text-accent">
+              <span className="tabular-nums">{phaseInfo.step}</span>
+              <span className="mx-1 text-muted-foreground">·</span>
+              <span className="truncate">{phaseInfo.text}</span>
+            </div>
             <div className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">
-              confirming · {elapsed}s
+              confirming · <span className="tabular-nums">{elapsed}s</span>
             </div>
           </div>
         ) : (
@@ -356,8 +370,8 @@ function NextCycleTimer() {
           </div>
         )}
       </div>
-      <div className="text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-        Claim → Swap → LP → Burn · every minute
+      <div className="h-4 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
+        Claim → Swap → LP → Burn
       </div>
     </div>
   );
