@@ -1169,9 +1169,28 @@ export async function runCycleStep(state?: CycleState): Promise<{
         break;
       }
       case "burn": {
+        // Pre-commit the post-cycle cooldown BEFORE broadcasting. If burn lands
+        // but confirmation times out, the cooldown is already persisted so the
+        // next tick idles instead of re-burning / re-claiming.
+        await persistCycleProgress({
+          ...nextState,
+          cooldownUntilMs: Date.now() + CYCLE_INTERVAL_SEC * 1000,
+        });
+
         const r = await stepBurn(conn, signer, mint);
         steps = r.results;
         if (r.ok) {
+          nextState = resetCycleAfterBurnState();
+          done = true;
+          stepOk = true;
+        } else if (mayHaveBroadcast(steps)) {
+          // Burn likely landed; do NOT retry (would just fail on 0 balance and
+          // spin). End the cycle on the cooldown we already persisted.
+          steps.push({
+            step: "burn_confirmation_unknown",
+            ok: true,
+            info: "burn tx broadcast but confirmation timed out; ending cycle on cooldown",
+          });
           nextState = resetCycleAfterBurnState();
           done = true;
           stepOk = true;
