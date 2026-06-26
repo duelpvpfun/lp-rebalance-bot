@@ -511,15 +511,6 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       const raw = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
 
-      stage = "install-buffer";
-      if (typeof (globalThis as any).Buffer?.from !== "function") {
-        const mod: any = await import("buffer");
-        const BufferCtor = mod.Buffer ?? mod.default?.Buffer;
-        if (!BufferCtor?.from) throw new Error("Buffer polyfill load failed");
-        (globalThis as any).Buffer = BufferCtor;
-        (window as any).Buffer = BufferCtor;
-      }
-
       stage = "load-web3";
       const web3: any = await loadWeb3();
       const Transaction = web3?.Transaction;
