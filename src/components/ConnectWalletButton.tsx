@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Wallet } from "lucide-react";
+import { toast } from "sonner";
 import { useLaunchWallet, type LaunchWalletInfo } from "./WalletProvider";
 import {
   Dialog,
@@ -8,6 +9,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+
 
 export function ConnectWalletButton({ className = "" }: { className?: string }) {
   const { wallets, select, connect, connected, publicKey, disconnect, connecting } = useLaunchWallet();
