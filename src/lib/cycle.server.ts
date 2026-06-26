@@ -979,7 +979,9 @@ export async function runCycleStep(state?: CycleState): Promise<{
   const conn = new Connection(rpcUrl(), "confirmed");
   const tokenDecimals = await getTokenDecimals(conn, mint);
 
-  let nextState = startCycleIfNeeded(state ?? freshInMemoryState());
+  const inputState = state ?? freshInMemoryState();
+  const isStartingNewCycle = inputState.cycleStartMs === 0;
+  let nextState = startCycleIfNeeded(inputState);
   const currentPhase = nextState.phase;
   let steps: StepResult[] = [];
   let stepOk = false;
@@ -995,7 +997,7 @@ export async function runCycleStep(state?: CycleState): Promise<{
         // cycle. This uses the newest finalized dev-wallet signature of ANY
         // kind, so a tx that just landed blocks fresh claims across isolates.
         const walletCooldown = await walletCooldownState(conn, signer.publicKey);
-        if (walletCooldown && nextState.cycleStartMs <= 0) {
+        if (walletCooldown && isStartingNewCycle) {
           nextState = walletCooldown;
           done = true;
           stepOk = true;
