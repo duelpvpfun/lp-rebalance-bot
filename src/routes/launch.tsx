@@ -497,10 +497,10 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
         usdc: prepare.fund.usdc,
         sol: prepare.fund.sol,
       });
-      // Eager Buffer polyfill already runs in __root, but guard anyway.
-      const BufferCtor =
-        (globalThis as any).Buffer ?? (await import("buffer")).Buffer;
-      const raw = BufferCtor.from(b64, "base64");
+      // Decode base64 WITHOUT Buffer (browser-safe): atob -> Uint8Array.
+      const binary = atob(b64);
+      const raw = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
       const { Transaction } = await loadWeb3();
       const tx = Transaction.from(raw);
       const signed = await signTransaction(tx);
