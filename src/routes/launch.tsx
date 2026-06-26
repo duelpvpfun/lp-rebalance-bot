@@ -261,6 +261,138 @@ function SortPill({ label, active, onClick }: { label: string; active: boolean; 
   );
 }
 
+type TerminalCoin = {
+  mint: string;
+  name?: string;
+  symbol?: string;
+  image_url?: string;
+  imageUrl?: string;
+  deployer_wallet?: string;
+  deployerWallet?: string;
+  dev_wallet?: string;
+  created_at?: string | number;
+  createdAt?: string | number;
+  last_cycle_at?: string | number;
+  lastCycleAt?: string | number;
+  stats?: {
+    market_cap_usd?: number | null;
+    liquidity_usd?: number | null;
+  } | null;
+};
+
+function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "mcap" }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["launchpad-coins"],
+    queryFn: async () => {
+      const r = await fetch(
+        "https://stunning-yodel-r74qvrvjq564cqp5-8787.app.github.dev/coins",
+      );
+      if (!r.ok) throw new Error("failed");
+      const j = await r.json();
+      const arr: TerminalCoin[] = Array.isArray(j) ? j : j.coins ?? [];
+      return arr;
+    },
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  });
+
+  const ts = (c: TerminalCoin) => {
+    const v = c.created_at ?? c.createdAt;
+    return v ? new Date(v).getTime() : 0;
+  };
+  const bumpTs = (c: TerminalCoin) => {
+    const v = c.last_cycle_at ?? c.lastCycleAt ?? c.created_at ?? c.createdAt;
+    return v ? new Date(v).getTime() : 0;
+  };
+
+  const q = query.trim().toLowerCase();
+  const filtered = (data ?? []).filter((c) => {
+    if (!q) return true;
+    return (
+      c.name?.toLowerCase().includes(q) ||
+      c.symbol?.toLowerCase().includes(q) ||
+      c.mint?.toLowerCase().includes(q)
+    );
+  });
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === "new") return ts(b) - ts(a);
+    if (sort === "mcap")
+      return (b.stats?.market_cap_usd ?? 0) - (a.stats?.market_cap_usd ?? 0);
+    return bumpTs(b) - bumpTs(a);
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-6 border border-dashed border-border bg-card/30 p-10 text-center text-sm text-muted-foreground">
+        loading launches…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="mt-6 border border-dashed border-destructive/50 bg-card/30 p-10 text-center text-sm text-destructive">
+        couldn't load launches
+      </div>
+    );
+  }
+  if (sorted.length === 0) {
+    return (
+      <div className="mt-6 border border-dashed border-border bg-card/30 p-10 text-center text-sm">
+        <Sparkles className="mx-auto h-6 w-6 text-accent" />
+        <p className="mt-3 font-display text-xl">no launches match</p>
+        <p className="mt-2 text-muted-foreground">try a different search or sort.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {sorted.map((c) => {
+        const img = c.image_url ?? c.imageUrl;
+        const dev = c.deployer_wallet ?? c.deployerWallet ?? c.dev_wallet;
+        const pumpUrl = `https://pump.fun/coin/${c.mint}`;
+        return (
+          <a
+            key={c.mint}
+            href={pumpUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="pf-card group flex items-start gap-3 rounded-md border border-border bg-card/40 p-3 transition hover:border-accent"
+          >
+            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
+              {img ? (
+                <img src={img} alt={c.name ?? c.symbol ?? c.mint} className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-muted-foreground">?</span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1 text-xs leading-relaxed">
+              <div className="truncate text-sm font-bold text-foreground group-hover:text-accent">
+                {c.name ?? c.symbol ?? "Unnamed"}{" "}
+                <span className="font-normal text-muted-foreground">${c.symbol ?? "—"}</span>
+              </div>
+              <div className="text-muted-foreground">
+                mcap: <span className="font-bold text-accent">{fmtUsd(c.stats?.market_cap_usd)}</span>
+                {"  ·  "}
+                liq: <span className="font-bold text-foreground">{fmtUsd(c.stats?.liquidity_usd)}</span>
+              </div>
+              {dev && (
+                <div className="font-mono text-[10px] text-muted-foreground/80">
+                  dev: {dev.slice(0, 4)}…{dev.slice(-4)}
+                </div>
+              )}
+              <div className="font-mono text-[10px] text-muted-foreground/80">
+                ca: {c.mint.slice(0, 4)}…{c.mint.slice(-4)}
+              </div>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+
 function HowItWorksDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
