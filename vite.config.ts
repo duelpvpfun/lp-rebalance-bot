@@ -14,6 +14,7 @@ const V2_BROWSER_FALLBACK = [
   "codecs-data-structures",
   "codecs-numbers",
   "codecs-strings",
+  "errors",
   "options",
 ];
 
