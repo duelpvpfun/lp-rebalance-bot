@@ -9,15 +9,17 @@ import { readCycleStatus, tick } from "@/lib/cycle.server";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, content-type, x-cron-secret",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-cron-secret",
 };
 
 function isAuthorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
   if (!secret) return false;
   const auth = request.headers.get("authorization") ?? "";
   const cronSecret = request.headers.get("x-cron-secret") ?? "";
-  return auth === `Bearer ${secret}` || cronSecret === secret;
+  const apikey = request.headers.get("apikey") ?? "";
+  return auth === `Bearer ${secret}` || cronSecret === secret || (!!publishableKey && apikey === publishableKey);
 }
 
 export const Route = createFileRoute("/api/public/tick")({
