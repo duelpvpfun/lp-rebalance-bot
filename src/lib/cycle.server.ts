@@ -13,7 +13,14 @@ import {
   PumpAmmSdk,
   OnlinePumpAmmSdk,
   canonicalPumpPoolPda,
+  coinCreatorVaultAtaPda,
+  coinCreatorVaultAuthorityPda,
 } from "@pump-fun/pump-swap-sdk";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  getAssociatedTokenAddressSync,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 
 /**
  * Liquititty auto-cycle (USDC-quoted pump.fun coin).
@@ -21,7 +28,6 @@ import {
  * built-in scheduler route (/api/public/tick).
  */
 
-const PUMPPORTAL_LOCAL = "https://pumpportal.fun/api/trade-local";
 const JUPITER_QUOTE = "https://quote-api.jup.ag/v6/quote";
 const JUPITER_SWAP = "https://quote-api.jup.ag/v6/swap";
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -68,16 +74,6 @@ async function signAndSend(conn: Connection, signer: Keypair, txBytes: ArrayBuff
   return sig;
 }
 
-async function pumpPortalLocal(body: Record<string, unknown>): Promise<ArrayBuffer> {
-  const res = await fetch(PUMPPORTAL_LOCAL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`PumpPortal ${res.status}: ${await res.text()}`);
-  return res.arrayBuffer();
-}
-
 async function getTokenUiBalance(conn: Connection, owner: string, mint: string): Promise<number> {
   const accounts = await conn.getParsedTokenAccountsByOwner(new PublicKey(owner), {
     mint: new PublicKey(mint),
@@ -87,6 +83,36 @@ async function getTokenUiBalance(conn: Connection, owner: string, mint: string):
     total += Number(a.account.data.parsed.info.tokenAmount.uiAmount ?? 0);
   }
   return total;
+}
+
+async function getTokenAccountUiBalance(conn: Connection, tokenAccount: PublicKey): Promise<number> {
+  try {
+    const balance = await conn.getTokenAccountBalance(tokenAccount);
+    return balance.value.uiAmount ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function sendInstructions(
+  conn: Connection,
+  signer: Keypair,
+  ixs: TransactionInstruction[],
+): Promise<string> {
+  const latest = await conn.getLatestBlockhash();
+  const msg = new TransactionMessage({
+    payerKey: signer.publicKey,
+    recentBlockhash: latest.blockhash,
+    instructions: ixs,
+  }).compileToV0Message();
+  const tx = new VersionedTransaction(msg);
+  tx.sign([signer]);
+  const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+  await conn.confirmTransaction(
+    { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
+    "confirmed",
+  );
+  return sig;
 }
 
 async function getTokenDecimals(conn: Connection, mint: string): Promise<number> {
@@ -115,21 +141,74 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   const conn = new Connection(rpcUrl(), "confirmed");
   const tokenDecimals = await getTokenDecimals(conn, mint);
 
-  // STEP 1: claim
+  // STEP 1: claim PumpSwap USDC creator fees directly with the official SDK.
+  // PumpPortal's collectCreatorFee path was building/claiming the old WSOL vault,
+  // which produced successful-looking txs but 0 USDC claimed for this USDC pair.
   const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   try {
-    // USDC-quoted pump.fun coin: must pass pool="pump" + mint so PumpPortal
-    // builds collect_creator_fee_v2 with quote_mint=USDC (otherwise it
-    // defaults to the WSOL path and sweeps an empty SOL vault).
-    const txBuf = await pumpPortalLocal({
-      publicKey: pubkey,
-      action: "collectCreatorFee",
-      pool: "pump",
-      mint,
-      priorityFee: PRIORITY_FEE_SOL,
+    const offlineSdk = new PumpAmmSdk();
+    const coinCreator = signer.publicKey;
+    const quoteMint = new PublicKey(USDC_MINT);
+    const quoteTokenProgram = TOKEN_PROGRAM_ID;
+    const coinCreatorVaultAuthority = coinCreatorVaultAuthorityPda(coinCreator);
+    const coinCreatorVaultAta = coinCreatorVaultAtaPda(
+      coinCreatorVaultAuthority,
+      quoteMint,
+      quoteTokenProgram,
+    );
+    const coinCreatorTokenAccount = getAssociatedTokenAddressSync(
+      quoteMint,
+      coinCreator,
+      true,
+      quoteTokenProgram,
+    );
+
+    const vaultUsdc = await getTokenAccountUiBalance(conn, coinCreatorVaultAta);
+    steps.push({
+      step: "claimable_usdc_vault",
+      ok: true,
+      info: { usdc: vaultUsdc, vault: coinCreatorVaultAta.toBase58() },
     });
-    const sig = await signAndSend(conn, signer, txBuf);
-    steps.push({ step: "claim", ok: true, signature: sig });
+
+    if (vaultUsdc < 0.000001) {
+      steps.push({ step: "skip", ok: true, info: "no USDC creator rewards in PumpSwap vault" });
+      return { ok: true, steps };
+    }
+
+    const [coinCreatorVaultAtaAccountInfo, coinCreatorTokenAccountInfo] =
+      await conn.getMultipleAccountsInfo([coinCreatorVaultAta, coinCreatorTokenAccount]);
+
+    const claimIxs = await offlineSdk.collectCoinCreatorFee(
+      {
+        coinCreator,
+        quoteMint,
+        quoteTokenProgram,
+        coinCreatorVaultAuthority,
+        coinCreatorVaultAta,
+        coinCreatorTokenAccount,
+        coinCreatorVaultAtaAccountInfo,
+        coinCreatorTokenAccountInfo,
+      },
+      signer.publicKey,
+    );
+
+    const ixs: TransactionInstruction[] = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 250_000),
+      }),
+      createAssociatedTokenAccountIdempotentInstruction(
+        signer.publicKey,
+        coinCreatorTokenAccount,
+        coinCreator,
+        quoteMint,
+        quoteTokenProgram,
+      ),
+      ...claimIxs,
+    ];
+
+    const sig = await sendInstructions(conn, signer, ixs);
+    steps.push({ step: "claim", ok: true, signature: sig, info: { quoteMint: USDC_MINT } });
   } catch (e) {
     steps.push({ step: "claim", ok: false, error: (e as Error).message });
     return { ok: false, steps };
