@@ -61,8 +61,9 @@ function CoinsPage() {
       const arr: Coin[] = Array.isArray(j) ? j : j.coins ?? [];
       return arr;
     },
-    refetchInterval: 30_000,
-    staleTime: 15_000,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+
   });
 
   return (
