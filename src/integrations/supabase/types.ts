@@ -20,6 +20,7 @@ export type Database = {
           claim_guard_until: string | null
           claimed_usdc: number
           cooldown_until: string
+          cycle_minute_key: number | null
           cycle_start_at: string | null
           id: string
           lease_expires_at: string | null
@@ -33,6 +34,7 @@ export type Database = {
           claim_guard_until?: string | null
           claimed_usdc?: number
           cooldown_until?: string
+          cycle_minute_key?: number | null
           cycle_start_at?: string | null
           id?: string
           lease_expires_at?: string | null
@@ -46,6 +48,7 @@ export type Database = {
           claim_guard_until?: string | null
           claimed_usdc?: number
           cooldown_until?: string
+          cycle_minute_key?: number | null
           cycle_start_at?: string | null
           id?: string
           lease_expires_at?: string | null
@@ -68,6 +71,7 @@ export type Database = {
           claim_guard_until: string | null
           claimed_usdc: number
           cooldown_until: string
+          cycle_minute_key: number | null
           cycle_start_at: string | null
           id: string
           lease_expires_at: string | null
@@ -96,6 +100,7 @@ export type Database = {
           claim_guard_until: string | null
           claimed_usdc: number
           cooldown_until: string
+          cycle_minute_key: number | null
           cycle_start_at: string | null
           id: string
           lease_expires_at: string | null
