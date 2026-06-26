@@ -133,25 +133,44 @@ function CoinsPage() {
                   params={{ mint: c.mint }}
                   className="group rounded-md border border-border bg-card/40 p-3 transition hover:border-accent"
                 >
-                  <div className="aspect-square overflow-hidden rounded-md bg-secondary/40">
-                    {img ? (
-                      <img
-                        src={img}
-                        alt={c.name ?? c.symbol ?? c.mint}
-                        className="h-full w-full object-cover transition group-hover:scale-105"
-                      />
+                  <div className="flex items-center gap-2">
+                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-secondary/40">
+                      {img ? (
+                        <img
+                          src={img}
+                          alt={c.name ?? c.symbol ?? c.mint}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="grid h-full w-full place-items-center text-muted-foreground">?</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-bold">{c.name ?? c.symbol ?? "Unnamed"}</div>
+                      <div className="truncate text-xs text-muted-foreground">${c.symbol ?? "—"}</div>
+                    </div>
+                  </div>
+
+                  {/* mini chart */}
+                  <div className="mt-2 overflow-hidden rounded-md border border-border/60 bg-background/40">
+                    {c.pair_address ? (
+                      <div className="relative h-32 w-full">
+                        <iframe
+                          title={`chart-${c.mint}`}
+                          src={`https://dexscreener.com/solana/${c.pair_address}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1&header=0`}
+                          className="block h-full w-full"
+                          loading="lazy"
+                        />
+                        {/* mask dexscreener label/branding */}
+                        <div aria-hidden className="pointer-events-none absolute left-0 top-0 h-7 w-32 bg-card" />
+                      </div>
                     ) : (
-                      <div className="grid h-full w-full place-items-center text-muted-foreground">
-                        ?
+                      <div className="grid h-32 place-items-center text-[10px] text-muted-foreground">
+                        chart pending
                       </div>
                     )}
                   </div>
-                  <div className="mt-2 truncate text-sm font-bold">
-                    {c.name ?? c.symbol ?? "Unnamed"}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    ${c.symbol ?? "—"}
-                  </div>
+
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
                     <div className="rounded border border-border/60 bg-background/40 px-1.5 py-1">
                       <div className="text-[9px] uppercase tracking-wider text-muted-foreground">MCap</div>
