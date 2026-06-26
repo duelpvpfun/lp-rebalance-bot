@@ -1,9 +1,12 @@
+import { installBrowserPolyfills } from "./browser-polyfills";
+
 let bufferPromise: Promise<void> | null = null;
 let web3Promise: Promise<typeof import("@solana/web3.js")> | null = null;
 let splTokenPromise: Promise<typeof import("@solana/spl-token")> | null = null;
 
 async function ensureBrowserBuffer() {
   if (typeof window === "undefined") return;
+  installBrowserPolyfills();
   const globalScope = globalThis as any;
   if (globalScope.Buffer?.from) return;
 
@@ -11,6 +14,7 @@ async function ensureBrowserBuffer() {
     const BufferCtor = mod.Buffer ?? mod.default?.Buffer;
     if (BufferCtor?.from) {
       globalScope.Buffer = BufferCtor;
+      (window as any).Buffer = BufferCtor;
     }
   });
   await bufferPromise;

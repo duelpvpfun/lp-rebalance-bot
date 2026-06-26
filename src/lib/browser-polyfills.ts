@@ -1,11 +1,28 @@
 import { Buffer } from "buffer";
 
-if (typeof globalThis !== "undefined" && !(globalThis as any).Buffer) {
-  (globalThis as any).Buffer = Buffer;
+export function installBrowserPolyfills() {
+  if (typeof globalThis === "undefined") return;
+
+  const globalScope = globalThis as any;
+  if (!globalScope.Buffer?.from) {
+    globalScope.Buffer = Buffer;
+  }
+
+  if (!globalScope.global) {
+    globalScope.global = globalScope;
+  }
+
+  if (typeof window !== "undefined") {
+    const windowScope = window as any;
+    if (!windowScope.Buffer?.from) {
+      windowScope.Buffer = Buffer;
+    }
+    if (!windowScope.global) {
+      windowScope.global = globalScope;
+    }
+  }
 }
 
-if (typeof window !== "undefined" && !(window as any).Buffer) {
-  (window as any).Buffer = Buffer;
-}
+installBrowserPolyfills();
 
-export {};
+export { Buffer };
