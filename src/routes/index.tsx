@@ -305,114 +305,102 @@ type TickResponse = {
   nextPhase?: "claim" | "buy" | "lp" | "burn" | "idle";
   reason?: "cooldown" | "in_flight";
   secondsUntilNext?: number;
+  lastCycleAt?: number | null;
 };
 
 const PHASE_LABEL: Record<string, string> = {
-  claim: "Claiming USDC",
-  buy: "Buying $LIQUITITTY",
-  lp: "Adding to LP",
-  burn: "Burning LP",
+  claim: "1/4 · Claiming USDC creator rewards",
+  buy: "2/4 · Buying 35% back into $LIQUITITTY",
+  lp: "3/4 · Adding TOKEN + USDC to PumpSwap LP",
+  burn: "4/4 · Burning LP tokens (locking liquidity)",
 };
+
+const CYCLE_INTERVAL_SEC = 60;
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
   const queryClient = useQueryClient();
   const mounted = useMounted();
   const now = useNow(1000);
-  const inFlightRef = useRef(false);
-  const initialCooldownMs = data.cycleRuntime.cooldownUntil
-    ? data.cycleRuntime.cooldownUntil * 1000
-    : Date.now() + data.cycleIntervalSec * 1000;
-  const initialPhase = data.cycleRuntime.phase !== "idle" ? data.cycleRuntime.phase : null;
-  const [nextAt, setNextAt] = useState(() => initialCooldownMs);
-  const [activePhase, setActivePhase] = useState<string | null>(initialPhase);
+
+  // Source of truth for the countdown: last on-chain dev-wallet tx + 60s.
+  // Falls back to runtime cooldown row if no tx yet.
+  const [lastCycleAt, setLastCycleAt] = useState<number | null>(data.lastCycleAt);
+  const [phase, setPhase] = useState<"claim" | "buy" | "lp" | "burn" | "idle">(
+    data.cycleRuntime.phase,
+  );
   const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(
     data.cycleRuntime.cycleStartAt ? data.cycleRuntime.cycleStartAt * 1000 : null,
   );
 
   useEffect(() => {
-    if (!mounted) return;
-    const runtimePhase = data.cycleRuntime.phase !== "idle" ? data.cycleRuntime.phase : null;
-    setActivePhase(runtimePhase);
-    setPhaseStartedAt(runtimePhase && data.cycleRuntime.cycleStartAt ? data.cycleRuntime.cycleStartAt * 1000 : null);
-    if (!runtimePhase && data.cycleRuntime.cooldownUntil) {
-      setNextAt(data.cycleRuntime.cooldownUntil * 1000);
-    }
-  }, [data.cycleRuntime.phase, data.cycleRuntime.cycleStartAt, data.cycleRuntime.cooldownUntil, mounted]);
+    setLastCycleAt((prev) =>
+      data.lastCycleAt && (!prev || data.lastCycleAt > prev) ? data.lastCycleAt : prev,
+    );
+  }, [data.lastCycleAt]);
 
   useEffect(() => {
     if (!mounted) return;
     const poll = async () => {
-      if (inFlightRef.current) return;
-      inFlightRef.current = true;
       try {
-        const res = await fetch("/api/public/tick", { method: "GET" });
-        const result = (await res.json()) as TickResponse;
-        const secs = typeof result.secondsUntilNext === "number" ? result.secondsUntilNext : 5;
-
-        if (result.ran) {
-          if (result.done) {
-            setActivePhase(null);
-            setPhaseStartedAt(null);
-            setNextAt(Date.now() + Math.max(1, secs) * 1000);
-          } else {
-            const next = result.nextPhase && result.nextPhase !== "idle" ? result.nextPhase : null;
-            setActivePhase((prev) => {
-              if (prev !== next) setPhaseStartedAt(Date.now());
-              return next;
-            });
-            setNextAt(Date.now() + Math.max(1, secs) * 1000);
-          }
-          queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
-        } else if (result.reason === "cooldown") {
-          setActivePhase(null);
-          setPhaseStartedAt(null);
-          setNextAt(Date.now() + Math.max(1, secs) * 1000);
-        } else if (result.reason === "in_flight") {
-          setActivePhase((prev) => {
-            if (!prev) {
-              setPhaseStartedAt(Date.now());
-              return result.phase && result.phase !== "idle" ? result.phase : "claim";
-            }
-            return prev;
-          });
+        const res = await fetch("/api/public/tick");
+        const r = (await res.json()) as TickResponse;
+        if (typeof r.lastCycleAt === "number") {
+          setLastCycleAt((prev) => (!prev || r.lastCycleAt! > prev ? r.lastCycleAt! : prev));
         }
+        const nextPhase = (r.nextPhase ?? r.phase ?? "idle") as typeof phase;
+        setPhase((prev) => {
+          if (prev !== nextPhase) setPhaseStartedAt(nextPhase === "idle" ? null : Date.now());
+          return nextPhase;
+        });
+        if (r.ran) queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
       } catch {
-        /* network blip — keep state */
-      } finally {
-        inFlightRef.current = false;
+        /* keep state */
       }
     };
     void poll();
-    const id = setInterval(() => void poll(), 5_000);
+    const id = setInterval(() => void poll(), 3_000);
     return () => clearInterval(id);
   }, [mounted, queryClient]);
 
-  const remaining = Math.max(0, Math.floor((nextAt - now) / 1000));
+  const targetMs = lastCycleAt
+    ? (lastCycleAt + CYCLE_INTERVAL_SEC) * 1000
+    : data.cycleRuntime.cooldownUntil
+      ? data.cycleRuntime.cooldownUntil * 1000
+      : Date.now() + CYCLE_INTERVAL_SEC * 1000;
+  const remaining = Math.max(0, Math.floor((targetMs - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
-  const displayActivePhase = mounted ? activePhase : null;
-  const elapsed = mounted && phaseStartedAt ? Math.floor((now - phaseStartedAt) / 1000) : 0;
-  const label = displayActivePhase ? PHASE_LABEL[displayActivePhase] ?? displayActivePhase : null;
+  const running = mounted && phase !== "idle";
+  const elapsed = mounted && phaseStartedAt ? Math.max(0, Math.floor((now - phaseStartedAt) / 1000)) : 0;
+  const phaseLabel = running ? PHASE_LABEL[phase] ?? phase : null;
+  const firing = mounted && !running && remaining === 0;
 
   return (
-    <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur min-w-[200px]">
+    <div className="rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur min-w-[260px]">
       <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-        {displayActivePhase && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
-        {displayActivePhase ? label : "Next cycle in"}
+        {(running || firing) && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
+        {running ? "Cycle running" : firing ? "Firing now…" : "Next cycle in"}
       </div>
-      {displayActivePhase ? (
-        <div className="font-display text-lg text-accent" suppressHydrationWarning>
-          {mounted ? `confirming · ${elapsed}s` : "…"}
+      {running ? (
+        <div className="mt-1 text-center" suppressHydrationWarning>
+          <div className="font-display text-base text-accent">{phaseLabel}</div>
+          <div className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+            confirming · {elapsed}s
+          </div>
         </div>
       ) : (
-        <div className="font-display text-3xl tabular-nums text-accent" suppressHydrationWarning>
+        <div className="mt-1 text-center font-display text-4xl tabular-nums text-accent" suppressHydrationWarning>
           {mounted ? `${mm}:${ss}` : "--:--"}
         </div>
       )}
+      <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
+        Claim → Swap → LP → Burn · every {CYCLE_INTERVAL_SEC}s
+      </div>
     </div>
   );
 }
+
 
 
 function TxList() {
