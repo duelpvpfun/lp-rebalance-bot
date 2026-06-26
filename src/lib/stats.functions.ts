@@ -45,8 +45,9 @@ function tokenDelta(tx: ParsedTx, owner: string, mint: string): number {
 }
 
 /**
- * Classify what the dev wallet actually did by reading on-chain balance
- * deltas — never guess from program IDs alone.
+ * Only surface the three real cycle events, and only when they actually moved
+ * funds on-chain. Zero-delta calls (e.g. "No creator fee to collect") are
+ * hidden — they're noise, not activity.
  */
 function classify(
   tx: ParsedTx,
@@ -57,30 +58,19 @@ function classify(
   const tokenD = tokenDelta(tx, wallet, mint);
   const usdcD = tokenDelta(tx, wallet, USDC_MINT);
 
-  // LP deposit/withdraw — PumpSwap program touched and BOTH sides moved out (or in for withdraw).
-  if (programIds.has(PUMP_AMM)) {
-    if (tokenD < 0 && usdcD < 0) return "Add Liquidity";
-    if (tokenD > 0 && usdcD > 0) return "Remove Liquidity";
-    // PumpSwap buy/sell via the AMM (no Jupiter)
-    if (tokenD > 0 && usdcD < 0) return "Buy $LIQUITITTY";
-    if (tokenD < 0 && usdcD > 0) return "Sell $LIQUITITTY";
-    return "PumpSwap Tx";
+  const touchesPump = programIds.has(PUMP_FUN) || programIds.has(PUMP_AMM);
+  const touchesJup = programIds.has(JUPITER_V6) || programIds.has(JUPITER_V4);
+
+  // 1) Claim Creator Rewards — USDC came in, no token movement, pump program touched.
+  if (touchesPump && usdcD > 0 && tokenD === 0) return "Claim Creator Rewards";
+
+  // 2) Buy $LIQUITITTY — USDC out, token in (Jupiter or PumpSwap).
+  if ((touchesJup || programIds.has(PUMP_AMM)) && tokenD > 0 && usdcD < 0) {
+    return "Buy $LIQUITITTY";
   }
 
-  // Creator fee claim — pump.fun program + USDC inflow + no token movement.
-  if (programIds.has(PUMP_FUN) && tokenD === 0 && usdcD > 0) {
-    return "Claim Creator Rewards";
-  }
-
-  // Jupiter swap — direction depends on token delta.
-  if (programIds.has(JUPITER_V6) || programIds.has(JUPITER_V4)) {
-    if (tokenD > 0) return "Buy $LIQUITITTY";
-    if (tokenD < 0) return "Sell $LIQUITITTY";
-  }
-
-  // Last-resort: pure token transfer of the mint by the dev wallet.
-  if (tokenD < 0 && usdcD === 0) return "Send $LIQUITITTY";
-  if (tokenD > 0 && usdcD === 0) return "Receive $LIQUITITTY";
+  // 3) Add Liquidity — both token and USDC leave wallet via PumpSwap.
+  if (programIds.has(PUMP_AMM) && tokenD < 0 && usdcD < 0) return "Add Liquidity";
 
   return null;
 }
