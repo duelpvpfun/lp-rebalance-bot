@@ -1,20 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { tick } from "@/lib/cycle.server";
+import { readCycleStatus, tick } from "@/lib/cycle.server";
 
 /**
- * Built-in scheduler. The website polls this endpoint; the handler runs
- * the cycle if and only if 5 minutes have elapsed since the last on-chain
- * action by the dev wallet. No external cron needed.
- *
- * Safe to call from anywhere — the heavy work is gated by an on-chain
- * timestamp + an in-memory single-flight lock. Spammers just get a
- * "cooldown" no-op.
+ * Cycle endpoint.
+ * GET is status-only for the website timer.
+ * POST is secret-protected and can advance exactly one cycle step.
  */
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "content-type",
+  "Access-Control-Allow-Headers": "authorization, content-type, x-cron-secret",
 };
+
+function isAuthorized(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const auth = request.headers.get("authorization") ?? "";
+  const cronSecret = request.headers.get("x-cron-secret") ?? "";
+  return auth === `Bearer ${secret}` || cronSecret === secret;
+}
 
 export const Route = createFileRoute("/api/public/tick")({
   server: {
@@ -22,7 +26,7 @@ export const Route = createFileRoute("/api/public/tick")({
       OPTIONS: async () => new Response(null, { status: 204, headers: CORS }),
       GET: async () => {
         try {
-          const result = await tick();
+          const result = await readCycleStatus();
           return Response.json(result, { headers: CORS });
         } catch (e) {
           return Response.json(
@@ -31,7 +35,10 @@ export const Route = createFileRoute("/api/public/tick")({
           );
         }
       },
-      POST: async () => {
+      POST: async ({ request }) => {
+        if (!isAuthorized(request)) {
+          return Response.json({ ran: false, error: "Unauthorized" }, { status: 401, headers: CORS });
+        }
         try {
           const result = await tick();
           return Response.json(result, { headers: CORS });

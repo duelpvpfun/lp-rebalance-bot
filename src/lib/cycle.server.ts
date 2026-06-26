@@ -35,8 +35,7 @@ import {
 
 /**
  * Liquititty auto-cycle (USDC-quoted pump.fun coin).
- * Shared between the cron route (/api/public/run-cycle) and the
- * built-in scheduler route (/api/public/tick).
+ * Shared between the cron/manual route and the built-in scheduler.
  *
  * The whole cycle runs against the canonical PumpSwap pool via the official
  * SDK — claim, buyback and LP all use the same pool and the same USDC quote
@@ -1131,6 +1130,30 @@ export type TickResult =
       phase: Phase | "idle";
       secondsUntilNext: number;
     };
+
+export type TickStatus = Extract<TickResult, { ran: false }>;
+
+export async function readCycleStatus(): Promise<TickStatus> {
+  const now = Date.now();
+  const state = (await readCycleState()) ?? (await ensureCycleStateRow());
+  const active = state.cycleStartMs > 0 && now - state.cycleStartMs <= STALE_CYCLE_MS;
+
+  if (active) {
+    return {
+      ran: false,
+      reason: "in_flight",
+      phase: state.phase,
+      secondsUntilNext: 3,
+    };
+  }
+
+  return {
+    ran: false,
+    reason: "cooldown",
+    phase: "idle",
+    secondsUntilNext: Math.max(1, Math.ceil((state.cooldownUntilMs - now) / 1000)),
+  };
+}
 
 export async function tick(): Promise<TickResult> {
   const now = Date.now();
