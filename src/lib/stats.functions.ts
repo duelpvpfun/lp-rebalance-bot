@@ -1,13 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import {
-  OnlinePumpAmmSdk,
-  canonicalPumpPoolPda,
-  poolPda,
-  lpMintPda,
-} from "@pump-fun/pump-swap-sdk";
-import { PumpSdk, bondingCurvePda } from "@pump-fun/pump-sdk";
+// Pump SDKs are heavy and pull in @solana/kit which mismatches with other
+// transitive @solana/errors versions in the browser bundle. They're only
+// needed inside server-function handlers, so we dynamic-import them below.
+type PumpSwapMod = typeof import("@pump-fun/pump-swap-sdk");
+type PumpMod = typeof import("@pump-fun/pump-sdk");
+let _pumpSwap: Promise<PumpSwapMod> | null = null;
+let _pump: Promise<PumpMod> | null = null;
+const pumpSwap = () => (_pumpSwap ??= import("@pump-fun/pump-swap-sdk"));
+const pump = () => (_pump ??= import("@pump-fun/pump-sdk"));
 
 const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
 
