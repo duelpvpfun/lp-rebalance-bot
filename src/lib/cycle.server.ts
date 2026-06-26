@@ -1201,6 +1201,11 @@ export async function runCycleStep(state?: CycleState): Promise<{
  * whole cycle should call tick() repeatedly. This just runs one step.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
+  const signer = loadKeypair();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const gated = await hardStartGate(conn, signer);
+  if (gated) return { ok: true, steps: [gated.step] };
+
   const r = await tick();
   return r.ran ? { ok: r.ok, steps: r.steps } : { ok: false, steps: [{ step: "tick", ok: false, info: r.reason }] };
 }
@@ -1263,17 +1268,23 @@ export type TickResult =
 
 export type TickStatus = Extract<TickResult, { ran: false }>;
 
-export async function readCycleStatus(): Promise<TickStatus> {
+export async function cycleStatus(): Promise<TickStatus> {
   const now = Date.now();
   const state = (await readCycleState()) ?? (await ensureCycleStateRow());
   const active = state.cycleStartMs > 0 && now - state.cycleStartMs <= STALE_CYCLE_MS;
+  const signer = loadKeypair();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
+  const secondsUntilNext = lastSigSec
+    ? Math.max(0, lastSigSec + CYCLE_INTERVAL_SEC - Math.floor(now / 1000))
+    : 0;
 
   if (active) {
     return {
       ran: false,
       reason: "in_flight",
       phase: state.phase,
-      secondsUntilNext: 3,
+      secondsUntilNext,
     };
   }
 
@@ -1281,8 +1292,12 @@ export async function readCycleStatus(): Promise<TickStatus> {
     ran: false,
     reason: "cooldown",
     phase: "idle",
-    secondsUntilNext: Math.max(1, Math.ceil((state.cooldownUntilMs - now) / 1000)),
+    secondsUntilNext,
   };
+}
+
+export async function readCycleStatus(): Promise<TickStatus> {
+  return cycleStatus();
 }
 
 export async function tick(): Promise<TickResult> {
