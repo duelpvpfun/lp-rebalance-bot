@@ -14,11 +14,11 @@ const REAL_LAUNCH_CUTOFF = 1782446614;
 const statsQuery = queryOptions({
   queryKey: ["stats"],
   queryFn: () => getStats(),
-  // Cron drives the cycle on our side; backend caches 60s in memory and
-  // serves stale on upstream failure, so visitor traffic never burns credits.
-  refetchInterval: 60_000,
+  // Backend caches 60s in memory; poll faster so new dev-wallet txs and the
+  // live cycle phase surface quickly without burning extra credits.
+  refetchInterval: 15_000,
   refetchIntervalInBackground: false,
-  staleTime: 60_000,
+  staleTime: 10_000,
 });
 
 export const Route = createFileRoute("/")({
