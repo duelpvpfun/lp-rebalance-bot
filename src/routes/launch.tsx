@@ -20,11 +20,13 @@ import { getStats } from "@/lib/stats.functions";
 import { ConnectWalletButton } from "@/components/ConnectWalletButton";
 import { useLaunchWallet } from "@/components/WalletProvider";
 import {
-  buildFundingTx,
+  fetchFundingTx,
   slugify,
   type PrepareResult,
   type LaunchStatus,
 } from "@/lib/launch-client";
+import { loadWeb3 } from "@/lib/solana-client";
+
 
 import {
   Dialog,
@@ -488,16 +490,21 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!prepare || !publicKey || !signTransaction) return;
     try {
       setPhase("signing");
-      const connection = await getConnection();
-      const tx = await buildFundingTx({
-        connection,
+      // Worker builds the transaction (reliable Buffer + spl-token server-side).
+      const { transaction: b64 } = await fetchFundingTx({
         payer: publicKey.toBase58(),
         devWallet: prepare.devWallet,
-        usdcAmount: prepare.fund.usdc,
-        solAmount: prepare.fund.sol,
-        usdcMint: prepare.fund.usdcMint,
+        usdc: prepare.fund.usdc,
+        sol: prepare.fund.sol,
       });
+      // Eager Buffer polyfill already runs in __root, but guard anyway.
+      const BufferCtor =
+        (globalThis as any).Buffer ?? (await import("buffer")).Buffer;
+      const raw = BufferCtor.from(b64, "base64");
+      const { Transaction } = await loadWeb3();
+      const tx = Transaction.from(raw);
       const signed = await signTransaction(tx);
+      const connection = await getConnection();
       const sig = await connection.sendRawTransaction(signed.serialize());
       setFundSig(sig);
       toast.success("Funding tx sent");
@@ -510,6 +517,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       setPhase("error");
     }
   }
+
 
   async function pollStatus(pendingId: string) {
     const deadline = Date.now() + 10 * 60_000; // 10 min cap
