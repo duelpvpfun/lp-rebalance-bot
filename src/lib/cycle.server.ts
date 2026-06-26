@@ -665,7 +665,7 @@ async function hardStartGate(
     };
   }
 
-  const solBalance = (await conn.getBalance(signer.publicKey, "finalized")) / 1e9;
+  const solBalance = (await conn.getBalance(signer.publicKey, "confirmed")) / 1e9;
   if (solBalance < MIN_SOL_BALANCE) {
     return {
       step: { step: "skip", ok: true, info: { reason: "low_sol" } },
