@@ -135,12 +135,13 @@ function Index() {
             </a>
           </div>
         </div>
-        <div className="relative mx-auto">
+        <div className="relative mx-auto w-full max-w-[260px] md:max-w-md">
           <div className="absolute inset-0 -z-10 blur-3xl">
             <div className="h-full w-full rounded-full bg-accent/40" />
           </div>
-          <img src={logo} alt="Liquititty" className="w-full max-w-md rounded-3xl shadow-2xl" />
+          <img src={logo} alt="Liquititty" className="w-full rounded-3xl shadow-2xl" />
         </div>
+
       </section>
 
       <section id="how" className="mx-auto max-w-6xl px-6 py-20">
