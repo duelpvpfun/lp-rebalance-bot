@@ -1,28 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { runCycle } from "@/lib/cycle.server";
+import { cycleStatus } from "@/lib/cycle.server";
 
 /**
- * Manual / cron trigger for the auto-LP cycle. This is the only route allowed
- * to execute a cycle, and it requires Bearer CRON_SECRET plus BOT_ENABLED=true.
+ * Disabled legacy trigger. Keeping the route prevents stale external cron jobs
+ * from 404-looping, but it can no longer sign transactions.
  */
 export const Route = createFileRoute("/api/public/run-cycle")({
   server: {
     handlers: {
-      POST: async ({ request }) => {
-        const auth = request.headers.get("authorization") ?? "";
-        const expected = `Bearer ${process.env.CRON_SECRET ?? ""}`;
-        if (!process.env.CRON_SECRET || auth !== expected) {
-          return new Response("Unauthorized", { status: 401 });
-        }
+      POST: async () => {
         try {
-          const result = await runCycle();
-          return Response.json(result, { status: result.ok ? 200 : 500 });
+          const result = await cycleStatus();
+          return Response.json({ ...result, disabled: true }, { status: 200 });
         } catch (e) {
-          return Response.json({ ok: false, error: (e as Error).message }, { status: 500 });
+          return Response.json({ ran: false, disabled: true, error: (e as Error).message }, { status: 500 });
         }
       },
       GET: async () =>
-        new Response("POST with Bearer CRON_SECRET to run the auto-LP cycle.", { status: 200 }),
+        new Response("Legacy run-cycle trigger disabled. The live timer uses /api/public/tick.", { status: 200 }),
     },
   },
 });
