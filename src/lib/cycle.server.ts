@@ -459,6 +459,10 @@ type CycleState = {
   attempts: number;
 };
 
+function isPhase(value: unknown): value is Phase {
+  return value === "claim" || value === "buy" || value === "lp" || value === "burn";
+}
+
 function cooldownState(nowMs = Date.now()): CycleState {
   return {
     phase: "claim",
@@ -470,9 +474,11 @@ function cooldownState(nowMs = Date.now()): CycleState {
   };
 }
 
-function rowToCycleState(row: Record<string, unknown>): CycleState {
+function rowToCycleState(raw: unknown): CycleState {
+  const row = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
+  if (!row) return cooldownState();
   return {
-    phase: row.phase as Phase,
+    phase: isPhase(row.phase) ? row.phase : "claim",
     cycleStartMs: row.cycle_start_at ? Date.parse(String(row.cycle_start_at)) : 0,
     cooldownUntilMs: row.cooldown_until ? Date.parse(String(row.cooldown_until)) : Date.now(),
     claimedUsdc: Number(row.claimed_usdc ?? 0),
@@ -533,7 +539,8 @@ async function acquireCycleLease(owner: string): Promise<CycleState | null> {
     p_lease_seconds: LEASE_SECONDS,
   });
   if (error) throw new Error(`cycle lease failed: ${error.message}`);
-  return data ? rowToCycleState(data as Record<string, unknown>) : null;
+  if (Array.isArray(data) && data.length === 0) return null;
+  return data ? rowToCycleState(data) : null;
 }
 
 async function persistCycleState(state: CycleState): Promise<void> {
