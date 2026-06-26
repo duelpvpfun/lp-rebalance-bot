@@ -387,16 +387,17 @@ function NextCycleTimer() {
   const remaining = Math.max(0, Math.floor((nextAt - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
-  const elapsed = phaseStartedAt ? Math.floor((now - phaseStartedAt) / 1000) : 0;
-  const label = activePhase ? PHASE_LABEL[activePhase] ?? activePhase : null;
+  const displayActivePhase = mounted ? activePhase : null;
+  const elapsed = mounted && phaseStartedAt ? Math.floor((now - phaseStartedAt) / 1000) : 0;
+  const label = displayActivePhase ? PHASE_LABEL[displayActivePhase] ?? displayActivePhase : null;
 
   return (
     <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur min-w-[200px]">
       <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-        {activePhase && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
-        {activePhase ? label : "Next cycle in"}
+        {displayActivePhase && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
+        {displayActivePhase ? label : "Next cycle in"}
       </div>
-      {activePhase ? (
+      {displayActivePhase ? (
         <div className="font-display text-lg text-accent" suppressHydrationWarning>
           {mounted ? `confirming · ${elapsed}s` : "…"}
         </div>

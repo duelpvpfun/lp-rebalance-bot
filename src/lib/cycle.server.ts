@@ -456,6 +456,7 @@ const MAX_STEP_ATTEMPTS = 4;
 const STATE_ID = "liquititty-auto-lp";
 const LEASE_SECONDS = 35;
 const STALE_CYCLE_MS = 5 * 60 * 1000;
+const MIN_CLAIM_USDC = 0.01;
 
 type CycleState = {
   phase: Phase;
@@ -625,6 +626,31 @@ function mayHaveBroadcast(steps: StepResult[]): boolean {
   );
 }
 
+async function readNewestDevWalletSignatureTsSec(
+  conn: Connection,
+  wallet: PublicKey,
+): Promise<number | null> {
+  try {
+    const sigs = await conn.getSignaturesForAddress(wallet, { limit: 1 }, "finalized");
+    return sigs[0]?.blockTime ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function walletCooldownState(
+  conn: Connection,
+  wallet: PublicKey,
+  nowMs = Date.now(),
+): Promise<CycleState | null> {
+  const lastSigSec = await readNewestDevWalletSignatureTsSec(conn, wallet);
+  if (!lastSigSec) return null;
+  const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
+  return nowMs < cooldownUntilMs
+    ? { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs }
+    : null;
+}
+
 
 /* ----------------- STEP 1: claim USDC creator fees ----------------- */
 async function stepClaim(
@@ -690,11 +716,11 @@ async function stepClaim(
         ok: true,
         info: { usdc: claimableUsdc, vault: creatorVaultUsdcAta.toBase58() },
       });
-      if (claimableUsdc < 0.5) {
+      if (claimableUsdc < MIN_CLAIM_USDC) {
         out.push({
           step: "skip",
           ok: true,
-          info: `bonding-curve vault below 0.5 USDC (${claimableUsdc}); skipping cycle to avoid dust spam`,
+          info: `bonding-curve vault below ${MIN_CLAIM_USDC} USDC (${claimableUsdc}); skipping cycle to avoid dust spam`,
         });
         return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
       }
@@ -752,11 +778,11 @@ async function stepClaim(
         ok: true,
         info: { usdc: vaultUsdc, vault: coinCreatorVaultAta.toBase58() },
       });
-      if (vaultUsdc < 0.5) {
+      if (vaultUsdc < MIN_CLAIM_USDC) {
         out.push({
           step: "skip",
           ok: true,
-          info: `PumpSwap vault below 0.5 USDC (${vaultUsdc}); skipping cycle to avoid dust spam`,
+          info: `PumpSwap vault below ${MIN_CLAIM_USDC} USDC (${vaultUsdc}); skipping cycle to avoid dust spam`,
         });
         return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
       }
@@ -826,7 +852,7 @@ async function stepBuy(
   // If earlier claim calls already landed before the state machine reached buy,
   // include that USDC too. This prevents "many tiny claims -> one tiny buy".
   const claimBasisUsdc = Math.max(claimedUsdc, walletUsdc);
-  if (claimBasisUsdc < 0.5 || walletUsdc < 0.5) {
+  if (claimBasisUsdc < MIN_CLAIM_USDC || walletUsdc < MIN_CLAIM_USDC) {
     out.push({ step: "skip", ok: true, info: "claimed USDC too small to buy" });
     return { results: out, ok: false, skip: true };
   }
@@ -953,7 +979,9 @@ export async function runCycleStep(state?: CycleState): Promise<{
   const conn = new Connection(rpcUrl(), "confirmed");
   const tokenDecimals = await getTokenDecimals(conn, mint);
 
-  let nextState = startCycleIfNeeded(state ?? freshInMemoryState());
+  const inputState = state ?? freshInMemoryState();
+  const isStartingNewCycle = inputState.cycleStartMs === 0;
+  let nextState = startCycleIfNeeded(inputState);
   const currentPhase = nextState.phase;
   let steps: StepResult[] = [];
   let stepOk = false;
@@ -964,31 +992,34 @@ export async function runCycleStep(state?: CycleState): Promise<{
       case "claim": {
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
-        // Absolute anti-spam guard: the moment a claim step starts, push the
-        // cooldown 60s into the future AND pre-advance the DB phase to BUY.
-        // Any other isolate that calls tick() inside that window sees
-        // cooldown_until > now and immediately bails without claiming again.
-        const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
-        nextState.cooldownUntilMs = claimGuardCooldown;
-        await persistCycleProgress({
-          ...nextState,
-          phase: "buy",
-          claimedUsdc: 0,
-          attempts: 0,
-          cooldownUntilMs: claimGuardCooldown,
-        });
+
+        // Final safety gate immediately before the first transaction of a new
+        // cycle. This uses the newest finalized dev-wallet signature of ANY
+        // kind, so a tx that just landed blocks fresh claims across isolates.
+        const walletCooldown = await walletCooldownState(conn, signer.publicKey);
+        if (walletCooldown && isStartingNewCycle) {
+          nextState = walletCooldown;
+          done = true;
+          stepOk = true;
+          steps = [{ step: "cooldown", ok: true, info: "newest dev-wallet tx is still inside the 60s cooldown" }];
+          break;
+        }
+
         const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
           // Pre-advance BEFORE broadcasting claim. If the host dies after this
           // point, the next tick buys instead of claiming again, which prevents
           // spam-claiming the vault and shrinking the eventual buy basis.
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
+          const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
+          nextState.cooldownUntilMs = claimGuardCooldown;
           await persistCycleProgress({
             ...nextState,
             phase: "buy",
             claimedUsdc: expectedClaimedUsdc,
             spotPrice: spotPriceUsdcPerToken,
             attempts: 0,
+            cooldownUntilMs: claimGuardCooldown,
           });
         });
         steps = r.results;
@@ -1001,7 +1032,7 @@ export async function runCycleStep(state?: CycleState): Promise<{
         if (r.ok) {
           nextState.claimedUsdc = r.claimedUsdc;
           nextState.spotPrice = r.spotPriceUsdcPerToken;
-          if (r.claimedUsdc < 0.5) {
+          if (r.claimedUsdc < MIN_CLAIM_USDC) {
             nextState = abortCycleState();
             done = true;
           } else {
@@ -1224,6 +1255,23 @@ export async function tick(): Promise<TickResult> {
 
   // Cooldown only gates the START of a new cycle. Mid-cycle ticks always run.
   const atStartOfCycle = leasedState.cycleStartMs === 0;
+
+  if (atStartOfCycle) {
+    const signer = loadKeypair();
+    const conn = new Connection(rpcUrl(), "confirmed");
+    const chainCooldown = await walletCooldownState(conn, signer.publicKey, now);
+    if (chainCooldown) {
+      await persistCycleState(chainCooldown);
+      lastKnownPhase = "idle";
+      return {
+        ran: false,
+        reason: "cooldown",
+        phase: "idle",
+        secondsUntilNext: Math.max(1, Math.ceil((chainCooldown.cooldownUntilMs - now) / 1000)),
+      };
+    }
+  }
+
   if (!atStartOfCycle && now - leasedState.cycleStartMs > STALE_CYCLE_MS) {
     const reset = abortCycleState();
     await persistCycleState(reset);
