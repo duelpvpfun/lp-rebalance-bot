@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { Suspense, useEffect, useState } from "react";
 import { Users } from "lucide-react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
