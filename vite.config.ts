@@ -47,7 +47,7 @@ export default defineConfig({
       server: {
         resolve: {
           alias: { ...sharedAlias, ...workerdSolanaAliases },
-        },
+        } as never,
       },
     },
   },
