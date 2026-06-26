@@ -60,7 +60,7 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
-function browserNodePolyfills(): Plugin {
+function browserNodePolyfills(): Plugin[] {
   return nodePolyfills({
     include: ["buffer", "process"],
     globals: { Buffer: true, global: true, process: true },
