@@ -60,7 +60,7 @@ const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
 // Minimum USDC to bother creating/seeding a brand-new pool on the first run.
 const MIN_SEED_USDC = 1;
 
-export const CYCLE_INTERVAL_SEC = 120; // 2 minutes between cycles
+export const CYCLE_INTERVAL_SEC = 60; // 1 minute between cycles — must match DB interval in acquire_cycle_runtime_lease / reserve_cycle_claim
 
 export type StepResult = {
   step: string;
