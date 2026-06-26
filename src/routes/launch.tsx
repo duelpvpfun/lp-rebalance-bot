@@ -350,13 +350,11 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
       {sorted.map((c) => {
         const img = c.image_url ?? c.imageUrl;
         const dev = c.deployer_wallet ?? c.deployerWallet ?? c.dev_wallet;
-        const pumpUrl = `https://pump.fun/coin/${c.mint}`;
         return (
-          <a
+          <Link
             key={c.mint}
-            href={pumpUrl}
-            target="_blank"
-            rel="noreferrer"
+            to="/coin/$mint"
+            params={{ mint: c.mint }}
             className="pf-card group flex items-start gap-3 rounded-md border border-border bg-card/40 p-3 transition hover:border-accent"
           >
             <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
@@ -385,7 +383,7 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
                 ca: {c.mint.slice(0, 4)}…{c.mint.slice(-4)}
               </div>
             </div>
-          </a>
+          </Link>
         );
       })}
     </div>
