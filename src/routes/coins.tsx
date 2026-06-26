@@ -150,6 +150,17 @@ function CoinsPage() {
                   <div className="text-xs text-muted-foreground">
                     ${c.symbol ?? "—"}
                   </div>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    <div className="rounded border border-border/60 bg-background/40 px-1.5 py-1">
+                      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">MCap</div>
+                      <div className="text-xs font-bold">{fmtUsd(c.stats?.market_cap_usd)}</div>
+                    </div>
+                    <div className="rounded border border-border/60 bg-background/40 px-1.5 py-1">
+                      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Liq</div>
+                      <div className="text-xs font-bold">{fmtUsd(c.stats?.liquidity_usd)}</div>
+                    </div>
+                  </div>
+
                 </Link>
               );
             })}
