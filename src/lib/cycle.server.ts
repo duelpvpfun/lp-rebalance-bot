@@ -440,8 +440,8 @@ async function burnLpTokens(
 /* ============================================================================
  * LOCKED CYCLE STATE MACHINE
  *
- * The only write path is runCycle(): one authorized call grabs one DB lease and
- * runs the fixed order claim → buy → lp → burn. A new claim is only allowed when
+ * Write paths can only advance through the DB lease and persisted cooldown.
+ * The fixed order is claim → buy → lp → burn. A new claim is only allowed when
  * the persisted cooldown has ended AND the lease was acquired. Read-only status
  * calls can never sign transactions.
  * ========================================================================== */
@@ -1233,8 +1233,9 @@ async function runCycleStep(state?: CycleState): Promise<{
 }
 
 /**
- * Locked full-cycle runner. One authorized cron POST should execute at most one
- * complete claim → buy → LP → burn pass while holding a single DB lease.
+ * Locked full-cycle runner for internal/manual use. The public legacy route no
+ * longer calls this; the live timer advances with tick() one locked step at a
+ * time to avoid serverless timeouts.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
   if (process.env.BOT_ENABLED !== "true") {
