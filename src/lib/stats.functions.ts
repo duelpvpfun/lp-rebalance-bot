@@ -236,6 +236,7 @@ async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial
   const devWallet = loadPubkey();
 
   // Sum BOTH known pools (our own + canonical) for total liquidity.
+  const { poolPda, canonicalPumpPoolPda } = await pumpSwap();
   const [own, canonical] = await Promise.all([
     readPoolReserves(conn, mint, poolPda(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk)),
     readPoolReserves(conn, mint, canonicalPumpPoolPda(mintPk, usdcPk)),
