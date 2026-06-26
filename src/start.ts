@@ -3,16 +3,11 @@ import { createStart, createMiddleware } from "@tanstack/react-start";
 import { renderErrorPage } from "./lib/error-page";
 import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
 
-// ONLY trigger of tick(): a single in-process scheduler per server isolate.
-// The /api/public/tick route is status-only. The DB-backed lease +
-// cooldown_until row keep this safe even if multiple isolates each start a
-// timer — only one isolate can hold the lease at any given moment, and the
-// cooldown is pushed 60s into the future the instant a cycle starts claiming.
-if (typeof window === "undefined") {
-  import("./lib/cycle.server")
-    .then(({ ensureScheduler }) => ensureScheduler())
-    .catch((e) => console.error("[scheduler] failed to start:", (e as Error).message));
-}
+// Do NOT auto-start the wallet cycle from the app server/runtime.
+// Serverless isolates, previews, and local dev servers can all spin up their
+// own copies; allowing each copy to schedule ticks is what causes duplicate
+// live claim/buy/LP/burn transactions. The public status endpoint is read-only;
+// cycle execution must happen through the locked cron/manual route only.
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
   try {
