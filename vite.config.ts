@@ -1,5 +1,4 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
 import type { Plugin } from "vite";
@@ -60,6 +59,24 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
+function browserBufferAliasPlugin(): Plugin {
+  const bufferEntry = path.resolve(__dirname, "node_modules/buffer/index.js");
+  const processEntry = path.resolve(__dirname, "node_modules/process/browser.js");
+
+  // Browser-only Node shims for Solana's client SDKs. This intentionally does
+  // not touch SSR/Nitro, because server packages import real node:* builtins.
+  return {
+    name: "browser-buffer-process-polyfills",
+    enforce: "pre",
+    resolveId(source) {
+      if (this.environment?.name !== "client") return null;
+      if (source === "buffer" || source === "node:buffer") return bufferEntry;
+      if (source === "process" || source === "node:process") return processEntry;
+      return null;
+    },
+  };
+}
+
 const sharedAlias = {
   "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
@@ -72,14 +89,7 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [
-      solanaServerAliasPlugin(),
-      nodePolyfills({
-        include: ["buffer", "process"],
-        globals: { Buffer: true, global: true, process: true },
-        protocolImports: true,
-      }),
-    ],
+    plugins: [solanaServerAliasPlugin(), browserBufferAliasPlugin()],
     define: {
       global: "globalThis",
     },
