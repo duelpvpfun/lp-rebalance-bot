@@ -1112,6 +1112,17 @@ export async function tick(): Promise<TickResult> {
 
   // Cooldown only gates the START of a new cycle. Mid-cycle ticks always run.
   const atStartOfCycle = leasedState.cycleStartMs === 0;
+  if (!atStartOfCycle && now - leasedState.cycleStartMs > STALE_CYCLE_MS) {
+    const reset = abortCycleState();
+    await persistCycleState(reset);
+    lastKnownPhase = "idle";
+    return {
+      ran: false,
+      reason: "cooldown",
+      phase: "idle",
+      secondsUntilNext: Math.ceil((reset.cooldownUntilMs - now) / 1000),
+    };
+  }
   if (atStartOfCycle && now < leasedState.cooldownUntilMs) {
     await persistCycleState(leasedState);
     lastKnownPhase = "idle";
