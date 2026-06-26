@@ -27,12 +27,6 @@ async function status() {
 
 async function advance() {
   try {
-    // Only the live website timer is allowed to advance the bot. This blocks
-    // stale external crons/scripts that may still be POSTing the public URL.
-    // The DB lease/cooldown remains the real duplicate-safety layer.
-    if (typeof Request !== "undefined") {
-      // no-op; kept so this function stays easy to read in the route handler below
-    }
     const result = await tick();
     return Response.json(result, { headers: CORS });
   } catch (e) {
