@@ -372,14 +372,7 @@ async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise
       success: !s.err,
     });
   }
-  return out
-    .sort((a, b) => {
-      const timeA = a.blockTime ?? 0;
-      const timeB = b.blockTime ?? 0;
-      if (timeA !== timeB) return timeB - timeA;
-      return CYCLE_LABEL_ORDER[a.label] - CYCLE_LABEL_ORDER[b.label];
-    })
-    .slice(0, 20);
+  return orderCycleTxs(out);
 }
 
 async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
