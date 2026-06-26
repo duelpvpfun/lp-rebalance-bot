@@ -63,7 +63,7 @@ function LaunchPage() {
             <nav className="hidden flex-wrap items-center gap-x-3 gap-y-1 md:flex">
               <Link to="/" className="pf-link">home</Link>
               <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="pf-link">community</a>
-              <a href="/#activity" className="pf-link">live activity</a>
+              
               <button type="button" onClick={() => setHowOpen(true)} className="pf-link cursor-pointer">how it works</button>
             </nav>
           </div>
