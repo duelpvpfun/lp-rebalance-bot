@@ -7,14 +7,12 @@ import bs58 from "bs58";
 // /* @vite-ignore */ so they never get bundled into the client.
 type PumpSwapMod = typeof import("@pump-fun/pump-swap-sdk");
 type PumpMod = typeof import("@pump-fun/pump-sdk");
-const PUMP_SWAP_PKG = "@pump-fun/pump-swap-sdk";
-const PUMP_PKG = "@pump-fun/pump-sdk";
 let _pumpSwap: Promise<PumpSwapMod> | null = null;
 let _pump: Promise<PumpMod> | null = null;
 const pumpSwap = (): Promise<PumpSwapMod> =>
-  (_pumpSwap ??= import(/* @vite-ignore */ PUMP_SWAP_PKG) as Promise<PumpSwapMod>);
+  (_pumpSwap ??= import("@pump-fun/pump-swap-sdk"));
 const pump = (): Promise<PumpMod> =>
-  (_pump ??= import(/* @vite-ignore */ PUMP_PKG) as Promise<PumpMod>);
+  (_pump ??= import("@pump-fun/pump-sdk"));
 
 const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
 
