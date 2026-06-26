@@ -460,17 +460,19 @@ function resetCycleAfterBurn() {
 }
 
 function abortCycle() {
-  // Same as post-burn reset but lastBurnMs unchanged so cooldown isn't extended
-  // by a fail-fast. Skips (nothing to claim) and hard failures both come here.
+  // Always stamp lastBurnMs so the cooldown restarts after ANY cycle end
+  // (success, skip, or hard failure). Otherwise a mid-cycle abort would leave
+  // an ancient lastBurnMs and the next tick would immediately re-claim.
   cycleState = {
     phase: "claim",
     cycleStartMs: 0,
-    lastBurnMs: cycleState.lastBurnMs || Date.now(),
+    lastBurnMs: Date.now(),
     claimedUsdc: 0,
     spotPrice: 0,
     attempts: 0,
   };
 }
+
 
 /* ----------------- STEP 1: claim USDC creator fees ----------------- */
 async function stepClaim(
