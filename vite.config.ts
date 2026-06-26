@@ -1,5 +1,4 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
 import type { Plugin } from "vite";
@@ -60,21 +59,20 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
-function browserNodePolyfills(): Plugin {
-  // Scope vite-plugin-node-polyfills to the browser/client environment only.
-  // If it runs in Nitro/SSR, it aliases node:buffer to the browser shim and
-  // breaks server packages that need real Node/workerd builtins.
+function browserBufferAliasPlugin(): Plugin {
+  const bufferEntry = path.resolve(__dirname, "node_modules/buffer/index.js");
+  const processEntry = path.resolve(__dirname, "node_modules/process/browser.js");
+
+  // Browser-only Node shims for Solana's client SDKs. This intentionally does
+  // not touch SSR/Nitro, because server packages import real node:* builtins.
   return {
-    name: "browser-only-node-polyfills",
-    configEnvironment(name) {
-      if (name !== "client") return null;
-      return {
-        plugins: nodePolyfills({
-          include: ["buffer", "process"],
-          globals: { Buffer: true, global: true, process: true },
-          protocolImports: true,
-        }),
-      };
+    name: "browser-buffer-process-polyfills",
+    enforce: "pre",
+    resolveId(source) {
+      if (this.environment?.name !== "client") return null;
+      if (source === "buffer" || source === "node:buffer") return bufferEntry;
+      if (source === "process" || source === "node:process") return processEntry;
+      return null;
     },
   };
 }
@@ -91,7 +89,7 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [solanaServerAliasPlugin(), browserNodePolyfills()],
+    plugins: [solanaServerAliasPlugin(), browserBufferAliasPlugin()],
     define: {
       global: "globalThis",
     },
