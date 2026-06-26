@@ -297,7 +297,7 @@ type TickResponse = {
   ran?: boolean;
   ok?: boolean;
   done?: boolean;
-  phase?: "claim" | "buy" | "lp" | "burn";
+  phase?: "claim" | "buy" | "lp" | "burn" | "idle";
   nextPhase?: "claim" | "buy" | "lp" | "burn" | "idle";
   reason?: "cooldown" | "in_flight";
   secondsUntilNext?: number;
@@ -316,9 +316,25 @@ function NextCycleTimer() {
   const mounted = useMounted();
   const now = useNow(1000);
   const inFlightRef = useRef(false);
-  const [nextAt, setNextAt] = useState(() => Date.now() + data.cycleIntervalSec * 1000);
-  const [activePhase, setActivePhase] = useState<string | null>(null);
-  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(null);
+  const initialCooldownMs = data.cycleRuntime.cooldownUntil
+    ? data.cycleRuntime.cooldownUntil * 1000
+    : Date.now() + data.cycleIntervalSec * 1000;
+  const initialPhase = data.cycleRuntime.phase !== "idle" ? data.cycleRuntime.phase : null;
+  const [nextAt, setNextAt] = useState(() => initialCooldownMs);
+  const [activePhase, setActivePhase] = useState<string | null>(initialPhase);
+  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(
+    data.cycleRuntime.cycleStartAt ? data.cycleRuntime.cycleStartAt * 1000 : null,
+  );
+
+  useEffect(() => {
+    if (!mounted) return;
+    const runtimePhase = data.cycleRuntime.phase !== "idle" ? data.cycleRuntime.phase : null;
+    setActivePhase(runtimePhase);
+    setPhaseStartedAt(runtimePhase && data.cycleRuntime.cycleStartAt ? data.cycleRuntime.cycleStartAt * 1000 : null);
+    if (!runtimePhase && data.cycleRuntime.cooldownUntil) {
+      setNextAt(data.cycleRuntime.cooldownUntil * 1000);
+    }
+  }, [data.cycleRuntime.phase, data.cycleRuntime.cycleStartAt, data.cycleRuntime.cooldownUntil, mounted]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -352,7 +368,7 @@ function NextCycleTimer() {
           setActivePhase((prev) => {
             if (!prev) {
               setPhaseStartedAt(Date.now());
-              return result.phase ?? "lp";
+              return result.phase && result.phase !== "idle" ? result.phase : "claim";
             }
             return prev;
           });

@@ -111,6 +111,7 @@ async function sendInstructions(
   signer: Keypair,
   ixs: TransactionInstruction[],
   timeoutMs: number = 22_000,
+  onBroadcast?: (signature: string) => Promise<void> | void,
 ): Promise<string> {
   // Prepend priority-fee + compute-limit so the tx actually lands on a busy
   // network. Without these, Helius/public RPC frequently sees the blockhash
@@ -145,6 +146,11 @@ async function sendInstructions(
   // or the blockhash expires. This is the pattern Helius/Jito recommend for
   // landing txs reliably on mainnet.
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
+  try {
+    await onBroadcast?.(sig);
+  } catch (e) {
+    throw new Error(`tx ${sig} broadcast but progress save failed: ${(e as Error).message}`);
+  }
 
   // 22s confirm window — keeps every step well under the serverless 30s host
   // timeout. Each tick runs exactly one step, so we don't need the long 75s
@@ -210,6 +216,7 @@ async function addToOwnPool(
   tokenDecimals: number,
   spotPriceUsdcPerToken: number,
   steps: StepResult[],
+  afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<boolean> {
   const mintPk = new PublicKey(mint);
   const usdcPk = new PublicKey(USDC_MINT);
@@ -267,7 +274,7 @@ async function addToOwnPool(
         }),
         ...createIxs,
       ];
-      const sig = await sendInstructions(conn, signer, ixs);
+      const sig = await sendInstructions(conn, signer, ixs, 22_000, afterBroadcast);
       steps.push({
         step: "createPool",
         ok: true,
@@ -327,7 +334,7 @@ async function addToOwnPool(
           }),
           ...lpIxs,
         ];
-        const sig = await sendInstructions(conn, signer, ixs);
+        const sig = await sendInstructions(conn, signer, ixs, 22_000, afterBroadcast);
         steps.push({
           step: "addLiquidity",
           ok: true,
@@ -341,6 +348,15 @@ async function addToOwnPool(
         return true;
       } catch (e) {
         lastErr = (e as Error).message;
+        if (lastErr.includes("did not confirm") || lastErr.includes("broadcast but progress save failed")) {
+          steps.push({
+            step: "addLiquidity_confirmation_unknown",
+            ok: true,
+            error: lastErr,
+            info: "LP tx was broadcast but confirmation timed out; advancing to burn instead of retrying a possible landed deposit",
+          });
+          return true;
+        }
         if (!lastErr.includes("insufficient USDC")) depositTokenUi *= LP_SHRINK_FACTOR;
         steps.push({
           step: `addLiquidity_retry_${attempt + 1}`,
@@ -431,46 +447,169 @@ async function burnLpTokens(
 type Phase = "claim" | "buy" | "lp" | "burn";
 
 const MAX_STEP_ATTEMPTS = 4;
+const STATE_ID = "liquititty-auto-lp";
+const LEASE_SECONDS = 35;
+const STALE_CYCLE_MS = 5 * 60 * 1000;
 
-let cycleState: {
+type CycleState = {
   phase: Phase;
   cycleStartMs: number;
-  lastBurnMs: number;
+  cooldownUntilMs: number;
   claimedUsdc: number;
   spotPrice: number;
   attempts: number;
-} = {
-  phase: "claim",
-  cycleStartMs: 0,
-  lastBurnMs: 0,
-  claimedUsdc: 0,
-  spotPrice: 0,
-  attempts: 0,
 };
 
-function resetCycleAfterBurn() {
-  cycleState = {
+function cooldownState(nowMs = Date.now()): CycleState {
+  return {
     phase: "claim",
     cycleStartMs: 0,
-    lastBurnMs: Date.now(),
+    cooldownUntilMs: nowMs + CYCLE_INTERVAL_SEC * 1000,
     claimedUsdc: 0,
     spotPrice: 0,
     attempts: 0,
   };
 }
 
-function abortCycle() {
-  // Always stamp lastBurnMs so the cooldown restarts after ANY cycle end
-  // (success, skip, or hard failure). Otherwise a mid-cycle abort would leave
-  // an ancient lastBurnMs and the next tick would immediately re-claim.
-  cycleState = {
-    phase: "claim",
-    cycleStartMs: 0,
-    lastBurnMs: Date.now(),
+function rowToCycleState(row: Record<string, unknown>): CycleState {
+  return {
+    phase: row.phase as Phase,
+    cycleStartMs: row.cycle_start_at ? Date.parse(String(row.cycle_start_at)) : 0,
+    cooldownUntilMs: row.cooldown_until ? Date.parse(String(row.cooldown_until)) : Date.now(),
+    claimedUsdc: Number(row.claimed_usdc ?? 0),
+    spotPrice: Number(row.spot_price ?? 0),
+    attempts: Number(row.attempts ?? 0),
+  };
+}
+
+async function cycleDb() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin as unknown as {
+    rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+    from: (table: string) => {
+      select: (columns: string) => { eq: (column: string, value: string) => { maybeSingle: () => Promise<{ data: unknown; error: { message: string } | null }> } };
+      update: (values: Record<string, unknown>) => { eq: (column: string, value: string) => Promise<{ error: { message: string } | null }> };
+      upsert: (values: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+    };
+  };
+}
+
+async function ensureCycleStateRow(): Promise<CycleState> {
+  const db = await cycleDb();
+  const starter = cooldownState();
+  const { error } = await db.from("cycle_runtime_state").upsert(
+    {
+      id: STATE_ID,
+      phase: starter.phase,
+      cycle_start_at: null,
+      cooldown_until: new Date(starter.cooldownUntilMs).toISOString(),
+      claimed_usdc: 0,
+      spot_price: 0,
+      attempts: 0,
+      lease_owner: null,
+      lease_expires_at: null,
+    },
+    { onConflict: "id", ignoreDuplicates: true },
+  );
+  if (error) throw new Error(`cycle state init failed: ${error.message}`);
+  return starter;
+}
+
+async function readCycleState(): Promise<CycleState | null> {
+  const db = await cycleDb();
+  const { data, error } = await db
+    .from("cycle_runtime_state")
+    .select("*")
+    .eq("id", STATE_ID)
+    .maybeSingle();
+  if (error) throw new Error(`cycle state read failed: ${error.message}`);
+  return data ? rowToCycleState(data as Record<string, unknown>) : null;
+}
+
+async function acquireCycleLease(owner: string): Promise<CycleState | null> {
+  const db = await cycleDb();
+  const { data, error } = await db.rpc("acquire_cycle_runtime_lease", {
+    p_id: STATE_ID,
+    p_owner: owner,
+    p_lease_seconds: LEASE_SECONDS,
+  });
+  if (error) throw new Error(`cycle lease failed: ${error.message}`);
+  return data ? rowToCycleState(data as Record<string, unknown>) : null;
+}
+
+async function persistCycleState(state: CycleState): Promise<void> {
+  const db = await cycleDb();
+  const { error } = await db
+    .from("cycle_runtime_state")
+    .update({
+      phase: state.phase,
+      cycle_start_at: state.cycleStartMs > 0 ? new Date(state.cycleStartMs).toISOString() : null,
+      cooldown_until: new Date(state.cooldownUntilMs).toISOString(),
+      claimed_usdc: state.claimedUsdc,
+      spot_price: state.spotPrice,
+      attempts: state.attempts,
+      lease_owner: null,
+      lease_expires_at: null,
+    })
+    .eq("id", STATE_ID);
+  if (error) throw new Error(`cycle state save failed: ${error.message}`);
+}
+
+async function persistCycleProgress(state: CycleState): Promise<void> {
+  const db = await cycleDb();
+  const { error } = await db
+    .from("cycle_runtime_state")
+    .update({
+      phase: state.phase,
+      cycle_start_at: state.cycleStartMs > 0 ? new Date(state.cycleStartMs).toISOString() : null,
+      cooldown_until: new Date(state.cooldownUntilMs).toISOString(),
+      claimed_usdc: state.claimedUsdc,
+      spot_price: state.spotPrice,
+      attempts: state.attempts,
+      // IMPORTANT: do NOT clear lease_owner / lease_expires_at here. This is
+      // used to pre-advance dangerous steps before broadcasting txs, while the
+      // global lock stays held so no other isolate can run the next step early.
+    })
+    .eq("id", STATE_ID);
+  if (error) throw new Error(`cycle progress save failed: ${error.message}`);
+}
+
+function startCycleIfNeeded(state: CycleState): CycleState {
+  if (state.cycleStartMs > 0) return { ...state };
+  return {
+    ...state,
+    cycleStartMs: Date.now(),
     claimedUsdc: 0,
     spotPrice: 0,
     attempts: 0,
   };
+}
+
+function abortCycleState(): CycleState {
+  // Always restart the 1-min cooldown after ANY cycle end (success, skip, or
+  // hard failure). This is what prevents immediate re-claims/re-buys.
+  return cooldownState();
+}
+
+function resetCycleAfterBurnState(): CycleState {
+  return cooldownState();
+}
+
+function freshInMemoryState(): CycleState {
+  return {
+    phase: "claim",
+    cycleStartMs: 0,
+    cooldownUntilMs: Date.now(),
+    claimedUsdc: 0,
+    spotPrice: 0,
+    attempts: 0,
+  };
+}
+
+function mayHaveBroadcast(steps: StepResult[]): boolean {
+  return steps.some(
+    (s) => typeof s.error === "string" && /tx\s+[1-9A-HJ-NP-Za-km-z]{32,}\s+(did not confirm|broadcast)/i.test(s.error),
+  );
 }
 
 
@@ -480,6 +619,7 @@ async function stepClaim(
   signer: Keypair,
   mint: string,
   tokenDecimals: number,
+  afterBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken: number) => Promise<void>,
 ): Promise<{
   results: StepResult[];
   claimedUsdc: number;
@@ -548,7 +688,9 @@ async function stepClaim(
         TOKEN_PROGRAM_ID,
         user,
       );
-      const sig = await sendInstructions(conn, signer, claimIxs, 10_000);
+      const sig = await sendInstructions(conn, signer, claimIxs, 10_000, () =>
+        afterBroadcast?.(claimableUsdc, spotPriceUsdcPerToken),
+      );
       out.push({
         step: "claim",
         ok: true,
@@ -617,7 +759,9 @@ async function stepClaim(
         ),
         ...claimIxs,
       ];
-      const sig = await sendInstructions(conn, signer, ixs, 10_000);
+      const sig = await sendInstructions(conn, signer, ixs, 10_000, () =>
+        afterBroadcast?.(vaultUsdc, spotPriceUsdcPerToken),
+      );
       out.push({
         step: "claim",
         ok: true,
@@ -644,6 +788,7 @@ async function stepBuy(
   mint: string,
   tokenDecimals: number,
   claimedUsdc: number,
+  afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<{ results: StepResult[]; ok: boolean; skip: boolean }> {
   const out: StepResult[] = [];
   if (claimedUsdc < 0.5) {
@@ -690,7 +835,7 @@ async function stepBuy(
         tokenProgram,
         quoteTokenProgram: TOKEN_PROGRAM_ID,
       });
-      const sig = await sendInstructions(conn, signer, buyIxs);
+      const sig = await sendInstructions(conn, signer, buyIxs, 22_000, afterBroadcast);
       out.push({
         step: "swap",
         ok: true,
@@ -716,7 +861,7 @@ async function stepBuy(
         spendUsdcRaw,
         SLIPPAGE_BPS / 100,
       );
-      const sig = await sendInstructions(conn, signer, buyIxs);
+      const sig = await sendInstructions(conn, signer, buyIxs, 22_000, afterBroadcast);
       out.push({
         step: "swap",
         ok: true,
@@ -738,9 +883,10 @@ async function stepLp(
   mint: string,
   tokenDecimals: number,
   spotPriceUsdcPerToken: number,
+  afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<{ results: StepResult[]; ok: boolean }> {
   const out: StepResult[] = [];
-  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, out);
+  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, out, afterBroadcast);
   return { results: out, ok };
 }
 
@@ -757,11 +903,12 @@ async function stepBurn(
 }
 
 /* ----------------- One-step driver (called by tick) ----------------- */
-export async function runCycleStep(): Promise<{
+export async function runCycleStep(state?: CycleState): Promise<{
   ok: boolean;
   phase: Phase;
   done: boolean;
   steps: StepResult[];
+  state: CycleState;
 }> {
   const mint = process.env.TOKEN_MINT_ADDRESS;
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
@@ -769,8 +916,8 @@ export async function runCycleStep(): Promise<{
   const conn = new Connection(rpcUrl(), "confirmed");
   const tokenDecimals = await getTokenDecimals(conn, mint);
 
-  if (cycleState.cycleStartMs === 0) cycleState.cycleStartMs = Date.now();
-  const currentPhase = cycleState.phase;
+  let nextState = startCycleIfNeeded(state ?? freshInMemoryState());
+  const currentPhase = nextState.phase;
   let steps: StepResult[] = [];
   let stepOk = false;
   let done = false;
@@ -778,66 +925,113 @@ export async function runCycleStep(): Promise<{
   try {
     switch (currentPhase) {
       case "claim": {
-        const r = await stepClaim(conn, signer, mint, tokenDecimals);
+        let broadcastClaimedUsdc = 0;
+        let broadcastSpotPrice = 0;
+        const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
+          // Pre-advance BEFORE broadcasting claim. If the host dies after send,
+          // the next tick buys 35% of THIS claim instead of claiming again.
+          broadcastClaimedUsdc = expectedClaimedUsdc;
+          broadcastSpotPrice = spotPriceUsdcPerToken;
+          await persistCycleProgress({
+            ...nextState,
+            phase: "buy",
+            claimedUsdc: expectedClaimedUsdc,
+            spotPrice: spotPriceUsdcPerToken,
+            attempts: 0,
+          });
+        });
         steps = r.results;
         if (r.skip) {
-          abortCycle();
+          nextState = abortCycleState();
           done = true;
           stepOk = r.ok;
           break;
         }
         if (r.ok) {
-          cycleState.claimedUsdc = r.claimedUsdc;
-          cycleState.spotPrice = r.spotPriceUsdcPerToken;
+          nextState.claimedUsdc = r.claimedUsdc;
+          nextState.spotPrice = r.spotPriceUsdcPerToken;
           if (r.claimedUsdc < 0.5) {
-            abortCycle();
+            nextState = abortCycleState();
             done = true;
           } else {
-            cycleState.phase = "buy";
-            cycleState.attempts = 0;
+            nextState.phase = "buy";
+            nextState.attempts = 0;
           }
           stepOk = true;
         } else {
-          cycleState.attempts++;
+          if (mayHaveBroadcast(steps)) {
+            steps.push({
+              step: "claim_confirmation_unknown",
+              ok: true,
+              info: "claim tx was broadcast but confirmation timed out; advancing to buy instead of claiming again",
+            });
+            nextState.claimedUsdc = broadcastClaimedUsdc;
+            nextState.spotPrice = broadcastSpotPrice;
+            nextState.phase = "buy";
+            nextState.attempts = 0;
+            stepOk = true;
+          } else {
+            // Claim failures before broadcast get exactly one try per minute.
+            steps.push({ step: "claim", ok: false, error: "claim failed before broadcast — cooldown restarted" });
+            nextState = abortCycleState();
+            done = true;
+          }
         }
         break;
       }
       case "buy": {
-        const r = await stepBuy(conn, signer, mint, tokenDecimals, cycleState.claimedUsdc);
+        // Pre-advance BEFORE broadcasting the buy. This fully closes the
+        // serverless timeout window: no future tick can double-buy this claim.
+        await persistCycleProgress({ ...nextState, phase: "lp", attempts: 0 });
+        const r = await stepBuy(conn, signer, mint, tokenDecimals, nextState.claimedUsdc);
         steps = r.results;
         if (r.skip) {
           // can't buy → still try to LP whatever we hold next tick.
-          cycleState.phase = "lp";
-          cycleState.attempts = 0;
+          nextState.phase = "lp";
+          nextState.attempts = 0;
           stepOk = true;
         } else if (r.ok) {
-          cycleState.phase = "lp";
-          cycleState.attempts = 0;
+          nextState.phase = "lp";
+          nextState.attempts = 0;
           stepOk = true;
         } else {
           // NEVER retry buy: if it actually landed on-chain but confirmation
           // timed out, a retry would double-buy. Abort the cycle and let the
           // 1-min cooldown restart cleanly.
-          steps.push({
-            step: "buy",
-            ok: false,
-            error: "buy failed — aborting cycle to avoid double-buy on retry",
-          });
-          abortCycle();
-          done = true;
+          if (mayHaveBroadcast(steps)) {
+            steps.push({
+              step: "buy_confirmation_unknown",
+              ok: true,
+              info: "buy tx was broadcast but confirmation timed out; advancing to LP instead of retrying a possible landed buy",
+            });
+            nextState.phase = "lp";
+            nextState.attempts = 0;
+            stepOk = true;
+          } else {
+            steps.push({
+              step: "buy",
+              ok: false,
+              error: "buy failed before broadcast — cooldown restarted to avoid duplicate buys",
+            });
+            nextState = abortCycleState();
+            done = true;
+          }
         }
         break;
       }
 
       case "lp": {
-        const r = await stepLp(conn, signer, mint, tokenDecimals, cycleState.spotPrice);
+        // Same protection for LP: pre-advance to burn so a timeout can never
+        // deposit the same wallet balance twice.
+        await persistCycleProgress({ ...nextState, phase: "burn", attempts: 0 });
+        const r = await stepLp(conn, signer, mint, tokenDecimals, nextState.spotPrice);
         steps = r.results;
         if (r.ok) {
-          cycleState.phase = "burn";
-          cycleState.attempts = 0;
+          nextState.phase = "burn";
+          nextState.attempts = 0;
           stepOk = true;
         } else {
-          cycleState.attempts++;
+          nextState.attempts++;
         }
         break;
       }
@@ -845,32 +1039,32 @@ export async function runCycleStep(): Promise<{
         const r = await stepBurn(conn, signer, mint);
         steps = r.results;
         if (r.ok) {
-          resetCycleAfterBurn();
+          nextState = resetCycleAfterBurnState();
           done = true;
           stepOk = true;
         } else {
-          cycleState.attempts++;
+          nextState.attempts++;
         }
         break;
       }
     }
   } catch (e) {
     steps.push({ step: currentPhase, ok: false, error: (e as Error).message });
-    cycleState.attempts++;
+    nextState.attempts++;
   }
 
   // Safety: stop spinning on a step that keeps failing.
-  if (!stepOk && cycleState.attempts >= MAX_STEP_ATTEMPTS) {
+  if (!stepOk && nextState.attempts >= MAX_STEP_ATTEMPTS) {
     steps.push({
       step: currentPhase,
       ok: false,
-      error: `step "${currentPhase}" failed ${cycleState.attempts}x — aborting cycle`,
+      error: `step "${currentPhase}" failed ${nextState.attempts}x — aborting cycle`,
     });
-    abortCycle();
+    nextState = abortCycleState();
     done = true;
   }
 
-  return { ok: stepOk, phase: currentPhase, done, steps };
+  return { ok: stepOk, phase: currentPhase, done, steps, state: nextState };
 }
 
 /**
@@ -878,8 +1072,8 @@ export async function runCycleStep(): Promise<{
  * whole cycle should call tick() repeatedly. This just runs one step.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
-  const r = await runCycleStep();
-  return { ok: r.ok, steps: r.steps };
+  const r = await tick();
+  return r.ran ? { ok: r.ok, steps: r.steps } : { ok: false, steps: [{ step: "tick", ok: false, info: r.reason }] };
 }
 
 /**
@@ -917,7 +1111,9 @@ let inFlight: Promise<{
   phase: Phase;
   done: boolean;
   steps: StepResult[];
+  state: CycleState;
 }> | null = null;
+let lastKnownPhase: Phase | "idle" = "idle";
 
 export type TickResult =
   | {
@@ -939,27 +1135,52 @@ export type TickResult =
 export async function tick(): Promise<TickResult> {
   const now = Date.now();
   if (inFlight) {
-    return { ran: false, reason: "in_flight", phase: cycleState.phase, secondsUntilNext: 3 };
-  }
-  // Cooldown only gates the START of a new cycle. Mid-cycle ticks always run.
-  const atStartOfCycle = cycleState.cycleStartMs === 0;
-  if (atStartOfCycle && cycleState.lastBurnMs > 0) {
-    const sinceBurnSec = (now - cycleState.lastBurnMs) / 1000;
-    if (sinceBurnSec < CYCLE_INTERVAL_SEC) {
-      return {
-        ran: false,
-        reason: "cooldown",
-        phase: "idle",
-        secondsUntilNext: Math.ceil(CYCLE_INTERVAL_SEC - sinceBurnSec),
-      };
-    }
+    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3 };
   }
 
-  inFlight = runCycleStep();
+  const owner = `${now}-${Math.random().toString(36).slice(2)}`;
+  let leasedState = await acquireCycleLease(owner);
+  if (!leasedState) {
+    const locked = (await readCycleState()) ?? (await ensureCycleStateRow());
+    lastKnownPhase = locked.cycleStartMs > 0 ? locked.phase : "idle";
+    const secondsUntilNext = Math.max(1, Math.ceil((locked.cooldownUntilMs - now) / 1000));
+    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext };
+  }
+
+  // Cooldown only gates the START of a new cycle. Mid-cycle ticks always run.
+  const atStartOfCycle = leasedState.cycleStartMs === 0;
+  if (!atStartOfCycle && now - leasedState.cycleStartMs > STALE_CYCLE_MS) {
+    const reset = abortCycleState();
+    await persistCycleState(reset);
+    lastKnownPhase = "idle";
+    return {
+      ran: false,
+      reason: "cooldown",
+      phase: "idle",
+      secondsUntilNext: Math.ceil((reset.cooldownUntilMs - now) / 1000),
+    };
+  }
+  if (atStartOfCycle && now < leasedState.cooldownUntilMs) {
+    await persistCycleState(leasedState);
+    lastKnownPhase = "idle";
+    return {
+      ran: false,
+      reason: "cooldown",
+      phase: "idle",
+      secondsUntilNext: Math.ceil((leasedState.cooldownUntilMs - now) / 1000),
+    };
+  }
+
+  lastKnownPhase = leasedState.phase;
+  inFlight = runCycleStep(leasedState);
   try {
     const r = await inFlight;
-    const nextPhase: Phase | "idle" = r.done ? "idle" : cycleState.phase;
-    const secondsUntilNext = r.done ? CYCLE_INTERVAL_SEC : 4;
+    await persistCycleState(r.state);
+    const nextPhase: Phase | "idle" = r.done ? "idle" : r.state.phase;
+    lastKnownPhase = nextPhase;
+    const secondsUntilNext = r.done
+      ? Math.max(1, Math.ceil((r.state.cooldownUntilMs - Date.now()) / 1000))
+      : 4;
     return {
       ran: true,
       ok: r.ok,
