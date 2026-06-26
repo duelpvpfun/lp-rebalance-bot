@@ -20,7 +20,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Every creator reward is auto-claimed in USDC, partly bought back into $LIQUIDITTY, and dumped back into the PumpSwap LP. Liquidity only goes up.",
+          "Every creator reward is auto-claimed in USDC, partly bought back into $LIQUITITTY, and dumped back into the PumpSwap LP. Liquidity only goes up.",
       },
       { property: "og:title", content: "Liquititty" },
       { property: "og:description", content: "Tits up. Liquidity up. Fully on-chain auto-LP." },
@@ -99,7 +99,7 @@ function Index() {
             <span className="text-accent">LIQUIDITY</span> UP.
           </h1>
           <p className="mt-6 max-w-lg text-lg text-muted-foreground">
-            $LIQUIDITTY is a memecoin that pays its own bills. Every time the pool earns
+            $LIQUITITTY is a memecoin that pays its own bills. Every time the pool earns
             creator rewards, a robot grabs the cash and shoves it straight back into the
             liquidity pool. You don't have to trust anyone — it just happens, every 5 minutes.
           </p>
@@ -141,18 +141,18 @@ function Index() {
           <p className="text-xs uppercase tracking-widest text-accent">Explain it like I'm 5</p>
           <h2 className="mt-2 text-4xl md:text-5xl">HOW LIQUIDITY GROWS BY ITSELF</h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            A liquidity pool is just two buckets: one with $LIQUIDITTY and one with USDC.
+            A liquidity pool is just two buckets: one with $LIQUITITTY and one with USDC.
             People trade between them. Every trade pays a tiny fee, and pump.fun gives
             those fees to the coin's creator. Most coins, the creator pockets them.
-            $LIQUIDITTY doesn't. A bot does this on a 5-minute loop:
+            $LIQUITITTY doesn't. A bot does this on a 5-minute loop:
           </p>
         </div>
 
         <div className="mt-12 grid gap-6 md:grid-cols-4">
           {[
             { n: "01", t: "Collect the rent", d: "The dev wallet auto-claims creator fees from pump.fun. These arrive as real USDC (dollars)." },
-            { n: "02", t: "Buy some $LIQUIDITTY", d: "35% of that USDC is used to market-buy $LIQUIDITTY on PumpSwap. Yes, that nudges the price up — that's the point." },
-            { n: "03", t: "Pair them up", d: "Now the wallet holds fresh $LIQUIDITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match." },
+            { n: "02", t: "Buy some $LIQUITITTY", d: "35% of that USDC is used to market-buy $LIQUITITTY on PumpSwap. Yes, that nudges the price up — that's the point." },
+            { n: "03", t: "Pair them up", d: "Now the wallet holds fresh $LIQUITITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match." },
             { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 5 minutes ago. Repeat forever." },
           ].map((s) => (
             <div key={s.n} className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-1 hover:bg-card">
@@ -166,12 +166,12 @@ function Index() {
         <div className="mt-10 rounded-2xl border border-border bg-secondary/30 p-6 text-sm text-muted-foreground md:p-8">
           <p className="font-bold text-foreground">Why 35% and not 50/50?</p>
           <p className="mt-2">
-            When the bot buys $LIQUIDITTY, the price moves a little. So if it spent half
+            When the bot buys $LIQUITITTY, the price moves a little. So if it spent half
             on tokens and tried to LP the other half, the ratio would already be off and
             the deposit would leave USDC behind. 35% is the sweet spot to get a clean
             deposit. If the price keeps pumping between the buy and the LP, the bot
             shrinks the token side until the USDC matches and saves the leftover
-            $LIQUIDITTY for the next round.{" "}
+            $LIQUITITTY for the next round.{" "}
             <span className="text-foreground">Nothing ever leaves the wallet.</span>
           </p>
         </div>
@@ -213,9 +213,9 @@ function Index() {
       <section id="faq" className="mx-auto max-w-3xl px-6 py-20">
         <h2 className="text-4xl md:text-5xl">FAQ</h2>
         <div className="mt-8 space-y-4">
-          <Faq q="Wait, so the dev can't rug me?" a="The dev wallet only ever does three things: claim creator fees, buy $LIQUIDITTY, deposit into the LP. No transfers out. Watch it live in the activity section." />
+          <Faq q="Wait, so the dev can't rug me?" a="The dev wallet only ever does three things: claim creator fees, buy $LIQUITITTY, deposit into the LP. No transfers out. Watch it live in the activity section." />
           <Faq q="How often does it run?" a="Every 5 minutes. The countdown to the next cycle is right at the top of the activity section." />
-          <Faq q="Does the LP keep growing forever?" a="As long as people trade $LIQUIDITTY, yes. Trading pays fees → fees become liquidity → bigger LP = less slippage → more trading. Flywheel." />
+          <Faq q="Does the LP keep growing forever?" a="As long as people trade $LIQUITITTY, yes. Trading pays fees → fees become liquidity → bigger LP = less slippage → more trading. Flywheel." />
           <Faq q="What if the price moons between the buy and the deposit?" a="The bot retries the LP with a smaller token amount each pass until the USDC matches. Leftover tokens stay in the wallet and ship on the next cycle." />
           <Faq q="What chain?" a="Solana. PumpSwap pool. USDC pair." />
           <Faq q="Why the logo?" a="Two tits. Liquidity. It writes itself." />
@@ -227,7 +227,7 @@ function Index() {
           <img src={logo} alt="" className="h-8 w-8 rounded" />
           <div className="flex items-center gap-3">
             <CommunityIcon />
-            <span>© {new Date().getFullYear()} $LIQUIDITTY. Not financial advice. Not even good advice.</span>
+            <span>© {new Date().getFullYear()} $LIQUITITTY. Not financial advice. Not even good advice.</span>
           </div>
         </div>
       </footer>
@@ -261,7 +261,7 @@ function StatsBar() {
         <LiveBlock label="Market Cap" value={fmtUsd(d.marketCapUsd)} />
         <LiveBlock label="Liquidity (USD)" value={fmtUsd(d.liquidityUsd)} />
         <LiveBlock label="USDC in LP" value={fmtNum(d.liquidityUsdc, "USDC")} />
-        <LiveBlock label="$LIQUIDITTY in LP" value={fmtNum(d.liquidityToken, "LIQUIDITTY")} />
+        <LiveBlock label="$LIQUITITTY in LP" value={fmtNum(d.liquidityToken, "LIQUITITTY")} />
       </div>
       <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
         Live · refreshes every 30s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}

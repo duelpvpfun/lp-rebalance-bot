@@ -14,9 +14,9 @@ const PUMP_FUN = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 const JUPITER_V4 = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
 
-function labelFor(programIds: string[]): "Claim Creator Rewards" | "Buy $LIQUIDITTY" | "Add Liquidity" | null {
+function labelFor(programIds: string[]): "Claim Creator Rewards" | "Buy $LIQUITITTY" | "Add Liquidity" | null {
   if (programIds.includes(PUMP_AMM)) return "Add Liquidity";
-  if (programIds.includes(JUPITER_V6) || programIds.includes(JUPITER_V4)) return "Buy $LIQUIDITTY";
+  if (programIds.includes(JUPITER_V6) || programIds.includes(JUPITER_V4)) return "Buy $LIQUITITTY";
   if (programIds.includes(PUMP_FUN)) return "Claim Creator Rewards";
   return null;
 }
