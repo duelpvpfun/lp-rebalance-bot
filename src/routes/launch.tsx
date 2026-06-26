@@ -242,6 +242,19 @@ function LaunchPage() {
   );
 }
 
+function fmtNum(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  if (a >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `${(n / 1e3).toFixed(2)}K`;
+  if (a >= 1) return n.toFixed(2);
+  return n.toPrecision(3);
+}
+function fmtUsd(n: number | null | undefined) {
+  return n == null || !Number.isFinite(n) ? "—" : `$${fmtNum(n)}`;
+}
+
 function SortPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
