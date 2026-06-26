@@ -434,11 +434,20 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
+    const raw = await r.text();
     if (!r.ok) {
-      const t = await r.text();
-      throw new Error("Prepare failed: " + t);
+      let detail = raw;
+      try {
+        const j = JSON.parse(raw);
+        detail = j.error || j.message || j.detail || raw;
+      } catch {}
+      throw new Error(`Prepare failed (${r.status}): ${detail || "no response body"}`);
     }
-    return (await r.json()) as PrepareResult;
+    try {
+      return JSON.parse(raw) as PrepareResult;
+    } catch {
+      throw new Error(`Prepare failed: invalid JSON response — ${raw.slice(0, 200)}`);
+    }
   }
 
   async function onPrepareSubmit(e: React.FormEvent) {
@@ -1006,7 +1015,13 @@ function ImageDrop({
       }}
       role="button"
       tabIndex={0}
-      onClick={() => inputRef.current?.click()}
+      onClick={(e) => {
+        // Field wraps us in a <label>; prevent the label's native click from
+        // also opening the file picker (double-open closes the first one).
+        e.preventDefault();
+        e.stopPropagation();
+        inputRef.current?.click();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
