@@ -960,13 +960,24 @@ export async function runCycleStep(state?: CycleState): Promise<{
           // NEVER retry buy: if it actually landed on-chain but confirmation
           // timed out, a retry would double-buy. Abort the cycle and let the
           // 1-min cooldown restart cleanly.
-          steps.push({
-            step: "buy",
-            ok: false,
-            error: "buy failed — aborting cycle to avoid double-buy on retry",
-          });
-          nextState = abortCycleState();
-          done = true;
+          if (mayHaveBroadcast(steps)) {
+            steps.push({
+              step: "buy_confirmation_unknown",
+              ok: true,
+              info: "buy tx was broadcast but confirmation timed out; advancing to LP instead of retrying a possible landed buy",
+            });
+            nextState.phase = "lp";
+            nextState.attempts = 0;
+            stepOk = true;
+          } else {
+            steps.push({
+              step: "buy",
+              ok: false,
+              error: "buy failed before broadcast — cooldown restarted to avoid duplicate buys",
+            });
+            nextState = abortCycleState();
+            done = true;
+          }
         }
         break;
       }
