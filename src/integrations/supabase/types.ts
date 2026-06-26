@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      bot_runtime_secrets: {
+        Row: {
+          key: string
+          secret: string
+          updated_at: string
+        }
+        Insert: {
+          key: string
+          secret: string
+          updated_at?: string
+        }
+        Update: {
+          key?: string
+          secret?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      cycle_minute_runs: {
+        Row: {
+          created_at: string
+          finished_at: string | null
+          minute_key: number
+          started_at: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          finished_at?: string | null
+          minute_key: number
+          started_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          finished_at?: string | null
+          minute_key?: number
+          started_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cycle_runtime_state: {
         Row: {
           attempts: number
@@ -87,6 +132,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      liquititty_fire_tick: { Args: never; Returns: number }
       reserve_cycle_claim: {
         Args: {
           p_claimed_usdc: number
