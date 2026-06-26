@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Wallet } from "lucide-react";
+import { toast } from "sonner";
 import { useLaunchWallet, type LaunchWalletInfo } from "./WalletProvider";
 import {
   Dialog,
@@ -8,6 +9,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+
 
 export function ConnectWalletButton({ className = "" }: { className?: string }) {
   const { wallets, select, connect, connected, publicKey, disconnect, connecting } = useLaunchWallet();
@@ -54,34 +56,44 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            {wallets.map((w: LaunchWalletInfo) => (
-              <button
-                key={w.name}
-                type="button"
-                className="flex items-center gap-3 rounded-md border border-border bg-secondary/30 px-3 py-3 text-sm hover:border-accent"
-                onClick={async () => {
-                  try {
-                    if (w.readyState !== "Installed") {
-                      window.open(w.installUrl, "_blank", "noopener,noreferrer");
-                      return;
+            {wallets.map((w: LaunchWalletInfo) => {
+              const installed = w.readyState === "Installed" || (typeof window !== "undefined" && (
+                (w.name === "Phantom" && ((window as any).phantom?.solana || (window as any).solana?.isPhantom)) ||
+                (w.name === "Solflare" && (window as any).solflare)
+              ));
+              return (
+                <button
+                  key={w.name}
+                  type="button"
+                  className="flex items-center gap-3 rounded-md border border-border bg-secondary/30 px-3 py-3 text-sm hover:border-accent"
+                  onClick={async () => {
+                    try {
+                      if (!installed) {
+                        window.open(w.installUrl, "_blank", "noopener,noreferrer");
+                        toast.info(`${w.name} not detected — opening install page`);
+                        return;
+                      }
+                      select(w.name);
+                      await connect(w.name);
+                      toast.success(`${w.name} connected`);
+                      setOpen(false);
+                    } catch (e: any) {
+                      console.error("[wallet] connect failed", e);
+                      toast.error(e?.message || `Failed to connect ${w.name}`);
                     }
-                    select(w.name);
-                    await connect(w.name);
-                    setOpen(false);
-                  } catch (e) {
-                    console.error(e);
-                  }
-                }}
-              >
-                {w.icon && (
-                  <img src={w.icon} alt="" className="h-6 w-6" />
-                )}
-                <span className="font-semibold">{w.name}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {w.readyState}
-                </span>
-              </button>
-            ))}
+                  }}
+                >
+                  {w.icon && (
+                    <img src={w.icon} alt="" className="h-6 w-6" />
+                  )}
+                  <span className="font-semibold">{w.name}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {installed ? "Installed" : "Not detected"}
+                  </span>
+                </button>
+              );
+            })}
+
           </div>
         </DialogContent>
       </Dialog>
