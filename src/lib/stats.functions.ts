@@ -131,6 +131,18 @@ async function fetchDex(mint: string): Promise<DexStats> {
     if (!r.ok) throw new Error(`${r.status}`);
     const j = (await r.json()) as { pairs?: Array<Record<string, unknown>> };
     const pairs = j.pairs ?? [];
+    // Sum liquidity across EVERY pool for this token.
+    let sumUsd = 0;
+    let sumToken = 0;
+    let sumUsdc = 0;
+    let any = false;
+    for (const p of pairs) {
+      const liq = p.liquidity as { usd?: number; base?: number; quote?: number } | undefined;
+      const quoteSym = (p.quoteToken as { symbol?: string })?.symbol;
+      if (liq?.usd) { sumUsd += liq.usd; any = true; }
+      if (liq?.base) sumToken += liq.base;
+      if (liq?.quote && quoteSym === "USDC") sumUsdc += liq.quote;
+    }
     const pair =
       pairs.find(
         (p) =>
@@ -141,47 +153,30 @@ async function fetchDex(mint: string): Promise<DexStats> {
       pairs[0];
     if (!pair) {
       return {
-        priceUsd: null,
-        marketCapUsd: null,
-        liquidityUsd: null,
-        liquidityToken: null,
-        liquidityUsdc: null,
-        pairUrl: null,
-        dex: null,
+        priceUsd: null, marketCapUsd: null, liquidityUsd: null,
+        liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null,
       };
     }
-    const liq = pair.liquidity as { usd?: number; base?: number; quote?: number } | undefined;
     return {
       priceUsd: pair.priceUsd ? Number(pair.priceUsd) : null,
       marketCapUsd:
         (pair.marketCap as number | undefined) ?? (pair.fdv as number | undefined) ?? null,
-      liquidityUsd: liq?.usd ?? null,
-      liquidityToken: liq?.base ?? null,
-      liquidityUsdc: liq?.quote ?? null,
+      liquidityUsd: any ? sumUsd : null,
+      liquidityToken: sumToken || null,
+      liquidityUsdc: sumUsdc || null,
       pairUrl: (pair.url as string | undefined) ?? null,
       dex: (pair.dexId as string | undefined) ?? null,
     };
   } catch {
     return {
-      priceUsd: null,
-      marketCapUsd: null,
-      liquidityUsd: null,
-      liquidityToken: null,
-      liquidityUsdc: null,
-      pairUrl: null,
-      dex: null,
+      priceUsd: null, marketCapUsd: null, liquidityUsd: null,
+      liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null,
     };
   }
 }
 
 const TOKEN_SUPPLY_FALLBACK = 1_000_000_000;
 
-/**
- * Read liquidity straight from the canonical PumpSwap pool on-chain. This is
- * the source of truth and works the instant the pool exists — unlike
- * DexScreener, which can take many minutes to index a fresh pump.fun pair
- * (that lag is why the stats boxes were showing "—").
- */
 async function readPoolReserves(
   conn: Connection,
   mint: string,
@@ -191,25 +186,18 @@ async function readPoolReserves(
     const mintPk = new PublicKey(mint);
     const sdk = new OnlinePumpAmmSdk(conn);
     const pool = await sdk.fetchPool(poolPk);
-
-    // Base = our token, Quote = USDC.
     const [baseBal, quoteBal, tokenSupply] = await Promise.all([
       conn.getTokenAccountBalance(pool.poolBaseTokenAccount).catch(() => null),
       conn.getTokenAccountBalance(pool.poolQuoteTokenAccount).catch(() => null),
       conn.getTokenSupply(mintPk).catch(() => null),
     ]);
-
     const liquidityToken = baseBal?.value.uiAmount ?? null;
     const liquidityUsdc = quoteBal?.value.uiAmount ?? null;
-    if (liquidityToken == null || liquidityUsdc == null || liquidityToken <= 0) {
-      return null;
-    }
-
+    if (liquidityToken == null || liquidityUsdc == null || liquidityToken <= 0) return null;
     const priceUsd = liquidityUsdc / liquidityToken;
-    const liquidityUsd = liquidityUsdc * 2; // USDC side + equal-valued token side.
+    const liquidityUsd = liquidityUsdc * 2;
     const supply = tokenSupply?.value.uiAmount ?? TOKEN_SUPPLY_FALLBACK;
     const marketCapUsd = priceUsd * supply;
-
     return { priceUsd, marketCapUsd, liquidityUsd, liquidityToken, liquidityUsdc };
   } catch {
     return null;
@@ -221,16 +209,25 @@ async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial
   const usdcPk = new PublicKey(USDC_MINT);
   const devWallet = loadPubkey();
 
-  // 1) Our own bot-created pool (works pre- and post-bond).
-  const ownPool = poolPda(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk);
-  const own = await readPoolReserves(conn, mint, ownPool);
-  if (own) return own;
+  // Sum BOTH known pools (our own + canonical) for total liquidity.
+  const [own, canonical] = await Promise.all([
+    readPoolReserves(conn, mint, poolPda(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk)),
+    readPoolReserves(conn, mint, canonicalPumpPoolPda(mintPk, usdcPk)),
+  ]);
+  const pools = [own, canonical].filter((p): p is Partial<DexStats> => !!p);
+  if (pools.length > 0) {
+    const sum = (k: keyof DexStats) =>
+      pools.reduce((s, p) => s + ((p[k] as number | null | undefined) ?? 0), 0);
+    return {
+      priceUsd: pools[0].priceUsd ?? null,
+      marketCapUsd: pools[0].marketCapUsd ?? null,
+      liquidityUsd: sum("liquidityUsd"),
+      liquidityToken: sum("liquidityToken"),
+      liquidityUsdc: sum("liquidityUsdc"),
+    };
+  }
 
-  // 2) The canonical PumpSwap pool (exists once graduated).
-  const canonical = await readPoolReserves(conn, mint, canonicalPumpPoolPda(mintPk, usdcPk));
-  if (canonical) return canonical;
-
-  // 3) Pre-graduation: read the bonding curve so the boxes still populate.
+  // Pre-graduation: bonding curve.
   return fetchBondingCurveStats(conn, mint);
 }
 
