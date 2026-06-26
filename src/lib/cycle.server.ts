@@ -60,7 +60,7 @@ const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
 // Minimum USDC to bother creating/seeding a brand-new pool on the first run.
 const MIN_SEED_USDC = 1;
 
-export const CYCLE_INTERVAL_SEC = 60; // 1 minute between cycles — must match DB interval in acquire_cycle_runtime_lease / reserve_cycle_claim
+export const CYCLE_INTERVAL_SEC = 60; // 1 minute bucket — must match DB/pg_cron
 
 export type StepResult = {
   step: string;
@@ -450,11 +450,14 @@ type Phase = "claim" | "buy" | "lp" | "burn";
 
 const MAX_STEP_ATTEMPTS = 4;
 const STATE_ID = "liquititty-auto-lp";
-const LEASE_SECONDS = 180;
+// One serverless request owns exactly one step. If the host dies mid-step, the
+// next minute can resume the already-pre-advanced phase instead of waiting 3min.
+const LEASE_SECONDS = 50;
 const STALE_CYCLE_MS = 5 * 60 * 1000;
 const MIN_CLAIM_USDC = 0.01;
 const LAST_SIG_READ_RETRIES = 3;
 const LAST_SIG_READ_BACKOFF_MS = 350;
+const CYCLE_BUCKET_MS = CYCLE_INTERVAL_SEC * 1000;
 
 type LastCycleRead = number | "empty" | "error";
 
@@ -473,12 +476,33 @@ function isPhase(value: unknown): value is Phase {
   return value === "claim" || value === "buy" || value === "lp" || value === "burn";
 }
 
+function minuteKey(nowMs = Date.now()): number {
+  return Math.floor(nowMs / CYCLE_BUCKET_MS);
+}
+
+function nextMinuteBoundaryMs(nowMs = Date.now()): number {
+  return (minuteKey(nowMs) + 1) * CYCLE_BUCKET_MS;
+}
+
 function cooldownState(nowMs = Date.now()): CycleState {
+  const cooldownUntilMs = nextMinuteBoundaryMs(nowMs);
   return {
     phase: "claim",
     cycleStartMs: 0,
-    cooldownUntilMs: nowMs + CYCLE_INTERVAL_SEC * 1000,
-    claimGuardUntilMs: nowMs + CYCLE_INTERVAL_SEC * 1000,
+    cooldownUntilMs,
+    claimGuardUntilMs: cooldownUntilMs,
+    claimedUsdc: 0,
+    spotPrice: 0,
+    attempts: 0,
+  };
+}
+
+function cooldownUntilState(cooldownUntilMs: number): CycleState {
+  return {
+    phase: "claim",
+    cycleStartMs: 0,
+    cooldownUntilMs,
+    claimGuardUntilMs: cooldownUntilMs,
     claimedUsdc: 0,
     spotPrice: 0,
     attempts: 0,
@@ -693,11 +717,14 @@ async function hardStartGate(
       state: cooldownState(nowMs),
     };
   }
-  if (typeof lastSigSec === "number" && nowMs - lastSigSec * 1000 < CYCLE_INTERVAL_SEC * 1000) {
-    const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
+  // Deterministic bucket gate: a dev-wallet tx in THIS minute means this
+  // minute's cycle already acted. A tx in the previous minute must not block
+  // the new bucket, otherwise pg_cron at :00 misses buys/claims forever.
+  if (typeof lastSigSec === "number" && Math.floor(lastSigSec / CYCLE_INTERVAL_SEC) >= minuteKey(nowMs)) {
+    const cooldownUntilMs = nextMinuteBoundaryMs(nowMs);
     return {
-      step: { step: "skip", ok: true, info: { reason: "cooldown" } },
-      state: { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs },
+      step: { step: "skip", ok: true, info: { reason: "same_minute_wallet_tx" } },
+      state: cooldownUntilState(cooldownUntilMs),
     };
   }
 
@@ -720,9 +747,9 @@ async function walletCooldownState(
   const lastSigSec = await readLastCycleTsSec(conn, wallet);
   if (lastSigSec === "error") return cooldownState(nowMs);
   if (lastSigSec === "empty") return null;
-  const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
-  return nowMs < cooldownUntilMs
-    ? { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs, claimGuardUntilMs: cooldownUntilMs }
+  const cooldownUntilMs = nextMinuteBoundaryMs(nowMs);
+  return Math.floor(lastSigSec / CYCLE_INTERVAL_SEC) >= minuteKey(nowMs)
+    ? cooldownUntilState(cooldownUntilMs)
     : null;
 }
 
@@ -1089,7 +1116,7 @@ async function runCycleStep(state?: CycleState): Promise<{
     // network-heavy SDK calls or tx building. This makes the DB/UI source of
     // truth show "running" and prevents any caller from seeing an expired idle
     // row while the claim step is preparing.
-    nextState.cooldownUntilMs = Date.now() + CYCLE_INTERVAL_SEC * 1000;
+    nextState.cooldownUntilMs = nextMinuteBoundaryMs();
     await persistCycleProgress(nextState);
   }
   const currentPhase = nextState.phase;
@@ -1131,7 +1158,7 @@ async function runCycleStep(state?: CycleState): Promise<{
             throw new Error("claim already reserved by another runner — blocking duplicate claim tx");
           }
           claimProgressSaved = true;
-          const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
+          const claimGuardCooldown = nextMinuteBoundaryMs();
           nextState.cooldownUntilMs = claimGuardCooldown;
           nextState.claimGuardUntilMs = claimGuardCooldown;
           nextState.phase = "buy";
@@ -1247,10 +1274,11 @@ async function runCycleStep(state?: CycleState): Promise<{
         // Pre-commit the post-cycle cooldown BEFORE broadcasting. If burn lands
         // but confirmation times out, the cooldown is already persisted so the
         // next tick idles instead of re-burning / re-claiming.
+        const postBurnCooldownUntilMs = nextMinuteBoundaryMs();
         await persistCycleProgress({
           ...nextState,
-          cooldownUntilMs: Date.now() + CYCLE_INTERVAL_SEC * 1000,
-          claimGuardUntilMs: Date.now() + CYCLE_INTERVAL_SEC * 1000,
+          cooldownUntilMs: postBurnCooldownUntilMs,
+          claimGuardUntilMs: postBurnCooldownUntilMs,
         });
 
         const r = await stepBurn(conn, signer, mint);
