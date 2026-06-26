@@ -111,6 +111,7 @@ async function sendInstructions(
   signer: Keypair,
   ixs: TransactionInstruction[],
   timeoutMs: number = 22_000,
+  onBroadcast?: (signature: string) => Promise<void> | void,
 ): Promise<string> {
   // Prepend priority-fee + compute-limit so the tx actually lands on a busy
   // network. Without these, Helius/public RPC frequently sees the blockhash
@@ -145,6 +146,7 @@ async function sendInstructions(
   // or the blockhash expires. This is the pattern Helius/Jito recommend for
   // landing txs reliably on mainnet.
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
+  await onBroadcast?.(sig);
 
   // 22s confirm window — keeps every step well under the serverless 30s host
   // timeout. Each tick runs exactly one step, so we don't need the long 75s
