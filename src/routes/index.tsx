@@ -301,10 +301,10 @@ type TickResponse = {
 };
 
 const PHASE_LABEL: Record<string, string> = {
-  claim: "CLAIMING",
-  buy: "BUYING",
-  lp: "ADDING LP",
-  burn: "BURNING LP",
+  claim: "Claiming USDC",
+  buy: "Buying $LIQUITITTY",
+  lp: "Adding to LP",
+  burn: "Burning LP",
 };
 
 function NextCycleTimer() {
@@ -313,9 +313,9 @@ function NextCycleTimer() {
   const mounted = useMounted();
   const now = useNow(1000);
   const inFlightRef = useRef(false);
-  // Server is the source of truth for the countdown; we just display.
   const [nextAt, setNextAt] = useState(() => Date.now() + data.cycleIntervalSec * 1000);
   const [activePhase, setActivePhase] = useState<string | null>(null);
+  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!mounted) return;
@@ -328,30 +328,38 @@ function NextCycleTimer() {
         const secs = typeof result.secondsUntilNext === "number" ? result.secondsUntilNext : 5;
 
         if (result.ran) {
-          // A step executed. If the cycle is done (burn confirmed), reset the
-          // full countdown. Otherwise stay in "active" mode and tick again soon.
           if (result.done) {
             setActivePhase(null);
+            setPhaseStartedAt(null);
             setNextAt(Date.now() + Math.max(1, secs) * 1000);
           } else {
-            setActivePhase(result.nextPhase && result.nextPhase !== "idle" ? result.nextPhase : null);
+            const next = result.nextPhase && result.nextPhase !== "idle" ? result.nextPhase : null;
+            setActivePhase((prev) => {
+              if (prev !== next) setPhaseStartedAt(Date.now());
+              return next;
+            });
             setNextAt(Date.now() + Math.max(1, secs) * 1000);
           }
           queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
         } else if (result.reason === "cooldown") {
           setActivePhase(null);
+          setPhaseStartedAt(null);
           setNextAt(Date.now() + Math.max(1, secs) * 1000);
         } else if (result.reason === "in_flight") {
-          // Another tick is mid-step; check back shortly.
-          setNextAt(Date.now() + 3_000);
+          setActivePhase((prev) => {
+            if (!prev) {
+              setPhaseStartedAt(Date.now());
+              return result.phase ?? "lp";
+            }
+            return prev;
+          });
         }
       } catch {
-        setNextAt(Date.now() + 5_000);
+        /* network blip — keep state */
       } finally {
         inFlightRef.current = false;
       }
     };
-    // Kick once on mount, then poll every 5s so step machine progresses.
     void poll();
     const id = setInterval(() => void poll(), 5_000);
     return () => clearInterval(id);
@@ -360,15 +368,24 @@ function NextCycleTimer() {
   const remaining = Math.max(0, Math.floor((nextAt - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
-  const display = activePhase ? PHASE_LABEL[activePhase] ?? activePhase.toUpperCase() : `${mm}:${ss}`;
+  const elapsed = phaseStartedAt ? Math.floor((now - phaseStartedAt) / 1000) : 0;
+  const label = activePhase ? PHASE_LABEL[activePhase] ?? activePhase : null;
+
   return (
-    <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur">
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-        {activePhase ? "Cycle step" : "Next cycle in"}
+    <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur min-w-[200px]">
+      <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+        {activePhase && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
+        {activePhase ? label : "Next cycle in"}
       </div>
-      <div className="font-display text-3xl tabular-nums text-accent" suppressHydrationWarning>
-        {mounted ? display : "--:--"}
-      </div>
+      {activePhase ? (
+        <div className="font-display text-lg text-accent" suppressHydrationWarning>
+          {mounted ? `confirming · ${elapsed}s` : "…"}
+        </div>
+      ) : (
+        <div className="font-display text-3xl tabular-nums text-accent" suppressHydrationWarning>
+          {mounted ? `${mm}:${ss}` : "--:--"}
+        </div>
+      )}
     </div>
   );
 }
