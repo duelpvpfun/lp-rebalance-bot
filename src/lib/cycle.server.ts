@@ -1011,10 +1011,23 @@ export async function runCycleStep(state?: CycleState): Promise<{
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
-  const tokenDecimals = await getTokenDecimals(conn, mint);
 
   const inputState = state ?? freshInMemoryState();
   const isStartingNewCycle = inputState.cycleStartMs === 0;
+  if (isStartingNewCycle) {
+    const gated = await hardStartGate(conn, signer);
+    if (gated) {
+      return {
+        ok: true,
+        phase: "claim",
+        done: true,
+        steps: [gated.step],
+        state: gated.state,
+      };
+    }
+  }
+
+  const tokenDecimals = await getTokenDecimals(conn, mint);
   let nextState = startCycleIfNeeded(inputState);
   const currentPhase = nextState.phase;
   let steps: StepResult[] = [];
