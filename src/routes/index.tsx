@@ -47,7 +47,7 @@ function useAutoTick() {
     fire();
     const id = setInterval(() => {
       if (!cancelled) fire();
-    }, 60_000);
+    }, 10_000);
     return () => {
       cancelled = true;
       clearInterval(id);
