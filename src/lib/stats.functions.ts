@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { OnlinePumpAmmSdk, canonicalPumpPoolPda } from "@pump-fun/pump-swap-sdk";
+import { PumpSdk, bondingCurvePda } from "@pump-fun/pump-sdk";
 
 function rpcUrl(): string {
   const helius = process.env.HELIUS_API_KEY;
@@ -62,15 +63,18 @@ function classify(
   const touchesPump = programIds.has(PUMP_FUN) || programIds.has(PUMP_AMM);
   const touchesJup = programIds.has(JUPITER_V6) || programIds.has(JUPITER_V4);
 
-  // 1) Claim Creator Rewards — USDC came in, no token movement, pump program touched.
+  // 1) Claim Creator Rewards — USDC came in, no token movement, pump program
+  //    touched (works for both bonding-curve and AMM claims).
   if (touchesPump && usdcD > 0 && tokenD === 0) return "Claim Creator Rewards";
 
-  // 2) Buy $LIQUITITTY — USDC out, token in (Jupiter or PumpSwap).
-  if ((touchesJup || programIds.has(PUMP_AMM)) && tokenD > 0 && usdcD < 0) {
+  // 2) Buy $LIQUITITTY — USDC out, token in. Covers bonding-curve buys
+  //    (PUMP_FUN), AMM buys (PUMP_AMM) and Jupiter.
+  if ((touchesJup || touchesPump) && tokenD > 0 && usdcD < 0) {
     return "Buy $LIQUITITTY";
   }
 
-  // 3) Add Liquidity — both token and USDC leave wallet via PumpSwap.
+  // 3) Add Liquidity — both token and USDC leave wallet via PumpSwap (AMM only;
+  //    there is no LP add before graduation).
   if (programIds.has(PUMP_AMM) && tokenD < 0 && usdcD < 0) return "Add Liquidity";
 
   return null;
@@ -186,6 +190,54 @@ async function fetchOnchainPool(
       liquidityUsd,
       liquidityToken,
       liquidityUsdc,
+    };
+  } catch {
+    // No AMM pool yet — fall back to the bonding curve (pre-graduation).
+    return fetchBondingCurveStats(conn, mint);
+  }
+}
+
+/**
+ * Pre-graduation liquidity comes from the bonding curve, not an LP pool. We
+ * read the curve's reserves so the stats boxes populate while the token is
+ * still on pump.fun (before it shows up on DexScreener / PumpSwap).
+ */
+async function fetchBondingCurveStats(
+  conn: Connection,
+  mint: string,
+): Promise<Partial<DexStats>> {
+  try {
+    const mintPk = new PublicKey(mint);
+    const sdk = new PumpSdk();
+    const bcInfo = await conn.getAccountInfo(bondingCurvePda(mintPk));
+    if (!bcInfo) return {};
+    const bc = sdk.decodeBondingCurveNullable(bcInfo);
+    if (!bc || bc.complete) return {};
+
+    const [tokenSupply, mintDecimals] = await Promise.all([
+      conn.getTokenSupply(mintPk).catch(() => null),
+      conn.getTokenSupply(mintPk).then((r) => r.value.decimals).catch(() => 6),
+    ]);
+
+    const usdcDecimals = 6;
+    // Reserves currently held by the curve.
+    const realToken = Number(bc.realTokenReserves.toString()) / 10 ** mintDecimals;
+    const realUsdc = Number(bc.realQuoteReserves.toString()) / 10 ** usdcDecimals;
+    // Spot price from virtual reserves (USDC per token).
+    const vToken = Number(bc.virtualTokenReserves.toString()) / 10 ** mintDecimals;
+    const vUsdc = Number(bc.virtualQuoteReserves.toString()) / 10 ** usdcDecimals;
+    if (vToken <= 0) return {};
+    const priceUsd = vUsdc / vToken;
+
+    const supply = tokenSupply?.value.uiAmount ?? TOKEN_SUPPLY_FALLBACK;
+    const marketCapUsd = priceUsd * supply;
+
+    return {
+      priceUsd,
+      marketCapUsd,
+      liquidityUsd: realUsdc * 2,
+      liquidityToken: realToken,
+      liquidityUsdc: realUsdc,
     };
   } catch {
     return {};

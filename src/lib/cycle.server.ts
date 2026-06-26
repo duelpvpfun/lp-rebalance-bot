@@ -17,6 +17,12 @@ import {
   coinCreatorVaultAuthorityPda,
 } from "@pump-fun/pump-swap-sdk";
 import {
+  PumpSdk,
+  OnlinePumpSdk,
+  bondingCurvePda,
+  getBuyTokenAmountFromSolAmount,
+} from "@pump-fun/pump-sdk";
+import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
@@ -111,6 +117,153 @@ async function getTokenDecimals(conn: Connection, mint: string): Promise<number>
   return info.value?.data?.parsed?.info?.decimals ?? 6;
 }
 
+/**
+ * Pre-graduation cycle. There is no LP pool yet, so we:
+ *   1) claim USDC creator fees from the bonding-curve creator vault (V2 — the
+ *      quote-mint-aware claim PumpPortal does NOT build for USDC coins), then
+ *   2) spend 100% of the claimed USDC buying the token on the bonding curve.
+ *
+ * Buying on the curve pushes USDC into its reserves and raises the market cap,
+ * driving the token toward graduation. Once it graduates, runCycle() switches
+ * to the AMM flow (claim -> 35% buy -> add LP) on its own.
+ */
+async function runBondingCurveCycle(
+  conn: Connection,
+  signer: Keypair,
+  mint: string,
+  tokenDecimals: number,
+  steps: StepResult[],
+): Promise<{ ok: boolean; steps: StepResult[] }> {
+  const pubkey = signer.publicKey.toBase58();
+  const mintPk = new PublicKey(mint);
+  const usdcPk = new PublicKey(USDC_MINT);
+  const user = signer.publicKey;
+
+  const pumpSdk = new PumpSdk();
+  const onlinePumpSdk = new OnlinePumpSdk(conn);
+
+  // The creator vault is keyed by the bonding curve's on-chain `creator`. Only
+  // that wallet can claim the fees. Read it and verify the dev wallet matches.
+  const bcInfo = await conn.getAccountInfo(bondingCurvePda(mintPk));
+  const bondingCurve = bcInfo ? pumpSdk.decodeBondingCurveNullable(bcInfo) : null;
+  if (!bondingCurve) {
+    steps.push({ step: "claim", ok: false, error: "bonding curve account not found" });
+    return { ok: false, steps };
+  }
+  const creator = bondingCurve.creator;
+  if (!creator.equals(user)) {
+    steps.push({
+      step: "claim",
+      ok: false,
+      error:
+        `dev wallet ${pubkey} is not the token creator ${creator.toBase58()} — ` +
+        `creator rewards are paid to the creator wallet, so this wallet cannot claim them. ` +
+        `Set DEV_WALLET_PRIVATE_KEY to the token's creator wallet.`,
+    });
+    return { ok: false, steps };
+  }
+
+  // STEP 1: claim USDC creator fees (quote-mint-aware V2 claim).
+  const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
+  try {
+    const claimable = await onlinePumpSdk
+      .getCreatorVaultBalanceBothPrograms(creator)
+      .catch(() => new BN(0));
+    steps.push({
+      step: "claimable_usdc_vault",
+      ok: true,
+      info: { raw: claimable.toString() },
+    });
+
+    const claimIxs = await onlinePumpSdk.collectCoinCreatorFeeV2Instructions(
+      creator,
+      usdcPk,
+      TOKEN_PROGRAM_ID,
+      user,
+    );
+    const ixs: TransactionInstruction[] = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 250_000),
+      }),
+      ...claimIxs,
+    ];
+    const sig = await sendInstructions(conn, signer, ixs);
+    steps.push({ step: "claim", ok: true, signature: sig, info: { quoteMint: USDC_MINT } });
+  } catch (e) {
+    steps.push({ step: "claim", ok: false, error: (e as Error).message });
+    return { ok: false, steps };
+  }
+
+  await new Promise((r) => setTimeout(r, 4000));
+  const usdcAfter = await getTokenUiBalance(conn, pubkey, USDC_MINT);
+  const claimedUsdc = Math.max(0, usdcAfter - usdcBefore);
+  steps.push({ step: "claimed_amount", ok: true, info: { usdc: claimedUsdc } });
+
+  if (claimedUsdc < 0.5) {
+    steps.push({ step: "skip", ok: true, info: "claimed USDC too small, abort" });
+    return { ok: true, steps };
+  }
+
+  // STEP 2: buy the token on the bonding curve with 100% of the claimed USDC.
+  // (Pre-graduation there is no LP to add into, so the whole claim goes to the
+  // buy — that's what pushes the curve toward graduation.)
+  const spendUsdcRaw = new BN(Math.floor(claimedUsdc * 1e6).toString());
+  try {
+    const global = await onlinePumpSdk.fetchGlobal();
+    const feeConfig = await onlinePumpSdk.fetchFeeConfig().catch(() => null);
+    const buyState = await onlinePumpSdk.fetchBuyState(mintPk, user, TOKEN_PROGRAM_ID);
+    const mintSupply = bondingCurve.tokenTotalSupply ?? null;
+
+    // Estimate how many tokens `spendUsdcRaw` USDC buys at the current curve.
+    const expectedTokens = getBuyTokenAmountFromSolAmount({
+      global,
+      feeConfig,
+      mintSupply,
+      bondingCurve: buyState.bondingCurve,
+      amount: spendUsdcRaw,
+      quoteMint: usdcPk,
+    });
+
+    const buyIxs = await pumpSdk.buyV2Instructions({
+      global,
+      bondingCurveAccountInfo: buyState.bondingCurveAccountInfo,
+      bondingCurve: buyState.bondingCurve,
+      associatedUserAccountInfo: buyState.associatedUserAccountInfo,
+      mint: mintPk,
+      user,
+      amount: expectedTokens,
+      quoteAmount: spendUsdcRaw,
+      slippage: SLIPPAGE_BPS / 100,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      quoteTokenProgram: TOKEN_PROGRAM_ID,
+    });
+
+    const ixs: TransactionInstruction[] = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 350_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 350_000),
+      }),
+      ...buyIxs,
+    ];
+    const sig = await sendInstructions(conn, signer, ixs);
+    steps.push({
+      step: "swap",
+      ok: true,
+      signature: sig,
+      info: {
+        spentUsdc: claimedUsdc,
+        estTokens: Number(expectedTokens.toString()) / 10 ** tokenDecimals,
+        venue: "bonding_curve",
+      },
+    });
+    return { ok: true, steps };
+  } catch (e) {
+    steps.push({ step: "swap", ok: false, error: (e as Error).message });
+    return { ok: false, steps };
+  }
+}
+
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
   const steps: StepResult[] = [];
   const mint = process.env.TOKEN_MINT_ADDRESS;
@@ -120,7 +273,32 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   const pubkey = signer.publicKey.toBase58();
   const conn = new Connection(rpcUrl(), "confirmed");
   const tokenDecimals = await getTokenDecimals(conn, mint);
-
+  // Decide which venue we're on. Before a pump.fun coin graduates there is NO
+  // PumpSwap pool — the bonding curve itself is the liquidity. All the
+  // PumpSwap-based steps below would throw. So we check the bonding curve's
+  // `complete` flag and run the curve-phase cycle (claim USDC fees -> buy on
+  // the curve) until it graduates, then switch to the AMM cycle (claim -> buy
+  // -> add LP) automatically.
+  try {
+    const pumpSdk = new PumpSdk();
+    const bcInfo = await conn.getAccountInfo(bondingCurvePda(new PublicKey(mint)));
+    const bondingCurve = bcInfo ? pumpSdk.decodeBondingCurveNullable(bcInfo) : null;
+    if (bondingCurve && !bondingCurve.complete) {
+      steps.push({
+        step: "phase",
+        ok: true,
+        info: {
+          phase: "bonding_curve",
+          note: "token not graduated yet — claiming fees and buying on the curve to push toward graduation",
+        },
+      });
+      return await runBondingCurveCycle(conn, signer, mint, tokenDecimals, steps);
+    }
+    steps.push({ step: "phase", ok: true, info: { phase: "amm" } });
+  } catch (e) {
+    // If the curve probe fails, fall through to the AMM path (best effort).
+    steps.push({ step: "phase_probe", ok: false, error: (e as Error).message });
+  }
   // STEP 1: claim PumpSwap USDC creator fees directly with the official SDK.
   // PumpPortal's collectCreatorFee path was building/claiming the old WSOL vault,
   // which produced successful-looking txs but 0 USDC claimed for this USDC pair.
