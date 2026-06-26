@@ -72,6 +72,9 @@ export default defineConfig({
   },
   vite: {
     plugins: [solanaServerAliasPlugin()],
+    define: {
+      global: "globalThis",
+    },
     resolve: {
       alias: { ...sharedAlias },
     },
@@ -88,4 +91,5 @@ export default defineConfig({
       include: ["buffer"],
     },
   },
+
 });

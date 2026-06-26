@@ -1,3 +1,11 @@
-// Keep this file lightweight during SSR. Solana browser dependencies are loaded
-// lazily through `solana-client.ts`, which installs Buffer before importing them.
+import { Buffer } from "buffer";
+
+if (typeof globalThis !== "undefined" && !(globalThis as any).Buffer) {
+  (globalThis as any).Buffer = Buffer;
+}
+
+if (typeof window !== "undefined" && !(window as any).Buffer) {
+  (window as any).Buffer = Buffer;
+}
+
 export {};
