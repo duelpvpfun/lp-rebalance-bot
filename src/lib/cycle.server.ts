@@ -1112,7 +1112,7 @@ async function runCycleStep(state?: CycleState): Promise<{
           nextState = walletCooldown;
           done = true;
           stepOk = true;
-          steps = [{ step: "cooldown", ok: true, info: "newest dev-wallet tx is still inside the 60s cooldown" }];
+          steps = [{ step: "cooldown", ok: true, info: `newest dev-wallet tx is still inside the ${CYCLE_INTERVAL_SEC}s cooldown` }];
           break;
         }
 
