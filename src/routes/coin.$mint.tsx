@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Users, Rocket, ExternalLink } from "lucide-react";
+import { Users, Rocket, ExternalLink, ArrowLeft } from "lucide-react";
 import logo from "@/assets/liquititty-logo.webp";
 import { WORKER_BASE_PUBLIC } from "@/lib/launch-client";
 import { ConnectWalletButton } from "@/components/ConnectWalletButton";
@@ -74,44 +74,65 @@ function CoinPage() {
   const coin = data?.coin;
   const stats = data?.stats ?? null;
 
-  const activity = (data?.activity ?? []).slice().sort((a, b) => {
-    const ta = a.created_at ? Date.parse(a.created_at) : 0;
-    const tb = b.created_at ? Date.parse(b.created_at) : 0;
-    return tb - ta;
-  });
+  const activity = (data?.activity ?? [])
+    .filter((a) => !(a.step ?? "").toLowerCase().includes("sweep"))
+    .slice()
+    .sort((a, b) => {
+      const ta = a.created_at ? Date.parse(a.created_at) : 0;
+      const tb = b.created_at ? Date.parse(b.created_at) : 0;
+      return tb - ta;
+    });
 
   const img = coin?.image_url ?? coin?.imageUrl;
+  const pumpUrl = `https://pump.fun/coin/${mint}`;
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* Same header as the launchpad */}
       <header className="border-b border-border/60">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-3 px-4 py-3">
-          <Link to="/coins" className="flex items-center gap-3">
-            <img src={logo} alt="liquititty" className="h-8 w-8 rounded-md" />
-            <span className="font-display text-lg">liquititty / coins</span>
-          </Link>
-          <div className="flex items-center gap-2">
+        <div className="relative mx-auto flex max-w-[1400px] items-center justify-between gap-3 px-3 py-3 text-sm sm:px-4 sm:gap-4">
+          <div className="flex items-center gap-4">
+            <Link to="/" className="shrink-0">
+              <img src={logo} alt="liquititty" className="pf-wiggle h-8 w-8 rounded-md" />
+            </Link>
+            <nav className="hidden flex-wrap items-center gap-x-3 gap-y-1 md:flex">
+              <Link to="/" className="pf-link">home</Link>
+              <Link to="/launch" className="pf-link">launchpad</Link>
+              <Link to="/coins" className="pf-link">all coins</Link>
+              <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="pf-link">community</a>
+            </nav>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
             <a
               href={COMMUNITY_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent"
+              className="pf-shine hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent sm:inline-flex"
             >
               <Users className="h-3 w-3" /> community
             </a>
             <ConnectWalletButton />
             <Link
               to="/launch"
-              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground"
+              className="lp-glow inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground transition hover:scale-[1.03]"
             >
               <Rocket className="h-3.5 w-3.5" />
-              launch
+              launch a coin
             </Link>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-8">
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6">
+        {/* Back to terminal */}
+        <Link
+          to="/launch"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground transition hover:border-accent hover:text-accent"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          back to terminal
+        </Link>
+
         {isLoading && (
           <div className="py-20 text-center text-muted-foreground">loading…</div>
         )}
@@ -123,7 +144,7 @@ function CoinPage() {
 
         {coin && (
           <>
-            <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center">
               <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
                 {img ? (
                   <img src={img} alt={coin.name} className="h-full w-full object-cover" />
@@ -162,9 +183,17 @@ function CoinPage() {
                   </a>
                 </div>
               </div>
+              <a
+                href={pumpUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border border-accent/60 bg-accent/15 px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent transition hover:bg-accent hover:text-accent-foreground md:self-center"
+              >
+                view on pump.fun <ExternalLink className="h-3.5 w-3.5" />
+              </a>
             </div>
 
-            {/* stats block — same vibe as the home stats header */}
+            {/* stats block */}
             <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
               <Stat label="Market cap" value={fmtUsd(stats?.market_cap_usd)} />
               <Stat label="Liquidity" value={fmtUsd(stats?.liquidity_usd)} />
@@ -172,15 +201,21 @@ function CoinPage() {
               <Stat label={`$${coin.symbol ?? "TOKEN"} in LP`} value={fmtNum(stats?.liquidity_token)} />
             </div>
 
-
-            {/* dexscreener chart */}
+            {/* dexscreener chart — branding hidden via overlay */}
             <div className="mt-6 overflow-hidden rounded-md border border-border bg-card/30">
               {coin.pair_address ? (
-                <iframe
-                  title="chart"
-                  src={`https://dexscreener.com/solana/${coin.pair_address}?embed=1&theme=dark`}
-                  className="block h-[520px] w-full"
-                />
+                <div className="relative h-[520px] w-full">
+                  <iframe
+                    title="chart"
+                    src={`https://dexscreener.com/solana/${coin.pair_address}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1`}
+                    className="block h-full w-full"
+                  />
+                  {/* mask dexscreener label/branding in the embed corner */}
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute left-0 top-0 h-9 w-44 bg-card"
+                  />
+                </div>
               ) : (
                 <div className="grid h-[260px] place-items-center px-6 text-center text-sm text-muted-foreground">
                   chart available once trading starts
