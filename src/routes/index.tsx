@@ -452,7 +452,7 @@ function NextCycleTimer() {
         )}
       </div>
       <div className="text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-        Claim → Swap → LP → Burn · every {Math.round(CYCLE_INTERVAL_SEC / 60)} min
+        Claim → Swap → LP → Burn · every minute
       </div>
     </div>
   );
