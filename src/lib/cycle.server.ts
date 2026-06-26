@@ -1350,12 +1350,14 @@ export type TickResult =
       nextPhase: Phase | "idle";
       steps: StepResult[];
       secondsUntilNext: number;
+      lastCycleAt?: number | null;
     }
   | {
       ran: false;
       reason: "cooldown" | "in_flight";
       phase: Phase | "idle";
       secondsUntilNext: number;
+      lastCycleAt?: number | null;
     };
 
 export type TickStatus = Extract<TickResult, { ran: false }>;
@@ -1367,6 +1369,7 @@ export async function cycleStatus(): Promise<TickStatus> {
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
   const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
+  const lastCycleAt = typeof lastSigSec === "number" ? lastSigSec : null;
   const secondsUntilNext =
     lastSigSec === "error"
       ? CYCLE_INTERVAL_SEC
@@ -1375,20 +1378,9 @@ export async function cycleStatus(): Promise<TickStatus> {
         : 0;
 
   if (active) {
-    return {
-      ran: false,
-      reason: "in_flight",
-      phase: state.phase,
-      secondsUntilNext,
-    };
+    return { ran: false, reason: "in_flight", phase: state.phase, secondsUntilNext, lastCycleAt };
   }
-
-  return {
-    ran: false,
-    reason: "cooldown",
-    phase: "idle",
-    secondsUntilNext,
-  };
+  return { ran: false, reason: "cooldown", phase: "idle", secondsUntilNext, lastCycleAt };
 }
 
 export async function readCycleStatus(): Promise<TickStatus> {
@@ -1401,7 +1393,7 @@ export async function tick(): Promise<TickResult> {
   }
   const now = Date.now();
   if (inFlight) {
-    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3 };
+    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3, lastCycleAt: null };
   }
 
   const owner = `${now}-${Math.random().toString(36).slice(2)}`;
