@@ -10,18 +10,33 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LaunchRouteImport } from './routes/launch'
+import { Route as CoinsRouteImport } from './routes/coins'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CoinMintRouteImport } from './routes/coin.$mint'
 import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
+import { Route as ApiLaunchUploadRouteImport } from './routes/api/launch/upload'
+import { Route as ApiLaunchStatusRouteImport } from './routes/api/launch/status'
+import { Route as ApiLaunchPrepareRouteImport } from './routes/api/launch/prepare'
 
 const LaunchRoute = LaunchRouteImport.update({
   id: '/launch',
   path: '/launch',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CoinsRoute = CoinsRouteImport.update({
+  id: '/coins',
+  path: '/coins',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CoinMintRoute = CoinMintRouteImport.update({
+  id: '/coin/$mint',
+  path: '/coin/$mint',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicTickRoute = ApiPublicTickRouteImport.update({
@@ -34,42 +49,100 @@ const ApiPublicRunCycleRoute = ApiPublicRunCycleRouteImport.update({
   path: '/api/public/run-cycle',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiLaunchUploadRoute = ApiLaunchUploadRouteImport.update({
+  id: '/api/launch/upload',
+  path: '/api/launch/upload',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLaunchStatusRoute = ApiLaunchStatusRouteImport.update({
+  id: '/api/launch/status',
+  path: '/api/launch/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLaunchPrepareRoute = ApiLaunchPrepareRouteImport.update({
+  id: '/api/launch/prepare',
+  path: '/api/launch/prepare',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/coins': typeof CoinsRoute
   '/launch': typeof LaunchRoute
+  '/coin/$mint': typeof CoinMintRoute
+  '/api/launch/prepare': typeof ApiLaunchPrepareRoute
+  '/api/launch/status': typeof ApiLaunchStatusRoute
+  '/api/launch/upload': typeof ApiLaunchUploadRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/coins': typeof CoinsRoute
   '/launch': typeof LaunchRoute
+  '/coin/$mint': typeof CoinMintRoute
+  '/api/launch/prepare': typeof ApiLaunchPrepareRoute
+  '/api/launch/status': typeof ApiLaunchStatusRoute
+  '/api/launch/upload': typeof ApiLaunchUploadRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/coins': typeof CoinsRoute
   '/launch': typeof LaunchRoute
+  '/coin/$mint': typeof CoinMintRoute
+  '/api/launch/prepare': typeof ApiLaunchPrepareRoute
+  '/api/launch/status': typeof ApiLaunchStatusRoute
+  '/api/launch/upload': typeof ApiLaunchUploadRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/launch' | '/api/public/run-cycle' | '/api/public/tick'
+  fullPaths:
+    | '/'
+    | '/coins'
+    | '/launch'
+    | '/coin/$mint'
+    | '/api/launch/prepare'
+    | '/api/launch/status'
+    | '/api/launch/upload'
+    | '/api/public/run-cycle'
+    | '/api/public/tick'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/launch' | '/api/public/run-cycle' | '/api/public/tick'
+  to:
+    | '/'
+    | '/coins'
+    | '/launch'
+    | '/coin/$mint'
+    | '/api/launch/prepare'
+    | '/api/launch/status'
+    | '/api/launch/upload'
+    | '/api/public/run-cycle'
+    | '/api/public/tick'
   id:
     | '__root__'
     | '/'
+    | '/coins'
     | '/launch'
+    | '/coin/$mint'
+    | '/api/launch/prepare'
+    | '/api/launch/status'
+    | '/api/launch/upload'
     | '/api/public/run-cycle'
     | '/api/public/tick'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CoinsRoute: typeof CoinsRoute
   LaunchRoute: typeof LaunchRoute
+  CoinMintRoute: typeof CoinMintRoute
+  ApiLaunchPrepareRoute: typeof ApiLaunchPrepareRoute
+  ApiLaunchStatusRoute: typeof ApiLaunchStatusRoute
+  ApiLaunchUploadRoute: typeof ApiLaunchUploadRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
 }
@@ -83,11 +156,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LaunchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/coins': {
+      id: '/coins'
+      path: '/coins'
+      fullPath: '/coins'
+      preLoaderRoute: typeof CoinsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/coin/$mint': {
+      id: '/coin/$mint'
+      path: '/coin/$mint'
+      fullPath: '/coin/$mint'
+      preLoaderRoute: typeof CoinMintRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/tick': {
@@ -104,12 +191,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicRunCycleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/launch/upload': {
+      id: '/api/launch/upload'
+      path: '/api/launch/upload'
+      fullPath: '/api/launch/upload'
+      preLoaderRoute: typeof ApiLaunchUploadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/launch/status': {
+      id: '/api/launch/status'
+      path: '/api/launch/status'
+      fullPath: '/api/launch/status'
+      preLoaderRoute: typeof ApiLaunchStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/launch/prepare': {
+      id: '/api/launch/prepare'
+      path: '/api/launch/prepare'
+      fullPath: '/api/launch/prepare'
+      preLoaderRoute: typeof ApiLaunchPrepareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CoinsRoute: CoinsRoute,
   LaunchRoute: LaunchRoute,
+  CoinMintRoute: CoinMintRoute,
+  ApiLaunchPrepareRoute: ApiLaunchPrepareRoute,
+  ApiLaunchStatusRoute: ApiLaunchStatusRoute,
+  ApiLaunchUploadRoute: ApiLaunchUploadRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
 }
