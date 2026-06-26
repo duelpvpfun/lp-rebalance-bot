@@ -459,7 +459,7 @@ type Phase = "claim" | "buy" | "lp" | "burn";
 
 const MAX_STEP_ATTEMPTS = 4;
 const STATE_ID = "liquititty-auto-lp";
-const LEASE_SECONDS = 35;
+const LEASE_SECONDS = 180;
 const STALE_CYCLE_MS = 5 * 60 * 1000;
 const MIN_CLAIM_USDC = 0.01;
 
@@ -1226,8 +1226,8 @@ export async function runCycleStep(state?: CycleState): Promise<{
 }
 
 /**
- * Back-compat shim. The old monolithic runCycle is gone; callers that want a
- * whole cycle should call tick() repeatedly. This just runs one step.
+ * Locked full-cycle runner. One authorized cron POST should execute at most one
+ * complete claim → buy → LP → burn pass while holding a single DB lease.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
   if (process.env.BOT_ENABLED !== "true") {
@@ -1238,8 +1238,48 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   const gated = await hardStartGate(conn, signer);
   if (gated) return { ok: true, steps: [gated.step] };
 
-  const r = await tick();
-  return r.ran ? { ok: r.ok, steps: r.steps } : { ok: false, steps: [{ step: "tick", ok: false, info: r.reason }] };
+  await ensureCycleStateRow();
+  const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let state = await acquireCycleLease(owner);
+  if (!state) {
+    return { ok: true, steps: [{ step: "skip", ok: true, info: "locked" }] };
+  }
+
+  const steps: StepResult[] = [];
+  let ok = true;
+  let done = false;
+  const maxIterations = 6;
+
+  try {
+    for (let i = 0; i < maxIterations; i++) {
+      const result = await runCycleStep(state);
+      steps.push(...result.steps);
+      ok = ok && result.ok;
+      state = result.state;
+      done = result.done;
+
+      await persistCycleProgress(state);
+
+      if (done) break;
+    }
+
+    if (!done) {
+      steps.push({
+        step: "safety_cap",
+        ok: false,
+        error: `cycle exceeded ${maxIterations} step iterations — aborting to cooldown`,
+      });
+      ok = false;
+      state = abortCycleState();
+    }
+
+    await persistCycleState(state);
+    return { ok, steps };
+  } catch (e) {
+    steps.push({ step: "cycle", ok: false, error: (e as Error).message });
+    await persistCycleState(abortCycleState());
+    return { ok: false, steps };
+  }
 }
 
 /**
