@@ -971,14 +971,11 @@ export async function runCycleStep(state?: CycleState): Promise<{
         break;
       }
       case "buy": {
-        let buyBroadcast = false;
-        const r = await stepBuy(conn, signer, mint, tokenDecimals, nextState.claimedUsdc);
-        buyBroadcast = mayHaveBroadcast(r.results);
-        if (buyBroadcast) {
-          // If buy confirmation times out, this is already persisted as `lp`,
-          // so no future tick can double-buy the same claim.
+        const r = await stepBuy(conn, signer, mint, tokenDecimals, nextState.claimedUsdc, async () => {
+          // As soon as buy broadcasts, persist `lp`. If confirmation times out
+          // or the host dies, no future tick can double-buy the same claim.
           await persistCycleProgress({ ...nextState, phase: "lp", attempts: 0 });
-        }
+        });
         steps = r.results;
         if (r.skip) {
           // can't buy → still try to LP whatever we hold next tick.
