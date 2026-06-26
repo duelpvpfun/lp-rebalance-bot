@@ -341,6 +341,15 @@ async function addToOwnPool(
         return true;
       } catch (e) {
         lastErr = (e as Error).message;
+        if (lastErr.includes("did not confirm")) {
+          steps.push({
+            step: "addLiquidity_confirmation_unknown",
+            ok: true,
+            error: lastErr,
+            info: "LP tx was broadcast but confirmation timed out; advancing to burn instead of retrying a possible landed deposit",
+          });
+          return true;
+        }
         if (!lastErr.includes("insufficient USDC")) depositTokenUi *= LP_SHRINK_FACTOR;
         steps.push({
           step: `addLiquidity_retry_${attempt + 1}`,
