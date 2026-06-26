@@ -638,10 +638,14 @@ export async function readLastCycleTsSec(
   const c = conn ?? new Connection(rpcUrl(), "confirmed");
   const w = wallet ?? loadKeypair().publicKey;
   try {
-    // Newest dev-wallet signature of ANY kind, finalized only. Do not filter by
-    // program: claim/buy/LP/burn all prove the wallet acted and must cool down.
-    const sigs = await c.getSignaturesForAddress(w, { limit: 1 }, "finalized");
-    return sigs[0]?.blockTime ?? null;
+    // Newest dev-wallet signature of ANY kind at `confirmed` (NOT finalized).
+    // finalized lags 10-30s, so a tx that JUST landed (e.g. the burn we just
+    // sent) is invisible and the next tick re-claims. `confirmed` surfaces it
+    // in ~2-5s. Do not filter by program: claim/buy/LP/burn all count.
+    const sigs = await c.getSignaturesForAddress(w, { limit: 1 }, "confirmed");
+    if (sigs.length === 0) return null;
+    // A signature so fresh it has no blockTime yet still means "just acted".
+    return sigs[0].blockTime ?? Math.floor(Date.now() / 1000);
   } catch {
     return null;
   }
