@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicTickRoute = ApiPublicTickRouteImport.update({
+  id: '/api/public/tick',
+  path: '/api/public/tick',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicRunCycleRoute = ApiPublicRunCycleRouteImport.update({
@@ -26,27 +32,31 @@ const ApiPublicRunCycleRoute = ApiPublicRunCycleRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
+  '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
+  '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
+  '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/public/run-cycle'
+  fullPaths: '/' | '/api/public/run-cycle' | '/api/public/tick'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/public/run-cycle'
-  id: '__root__' | '/' | '/api/public/run-cycle'
+  to: '/' | '/api/public/run-cycle' | '/api/public/tick'
+  id: '__root__' | '/' | '/api/public/run-cycle' | '/api/public/tick'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
+  ApiPublicTickRoute: typeof ApiPublicTickRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/tick': {
+      id: '/api/public/tick'
+      path: '/api/public/tick'
+      fullPath: '/api/public/tick'
+      preLoaderRoute: typeof ApiPublicTickRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/run-cycle': {
@@ -71,6 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
+  ApiPublicTickRoute: ApiPublicTickRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
