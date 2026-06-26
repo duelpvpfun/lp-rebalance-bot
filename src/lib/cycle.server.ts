@@ -554,6 +554,24 @@ async function acquireCycleLease(owner: string): Promise<CycleState | null> {
   return rowToCycleState(row);
 }
 
+async function reserveClaimProgress(
+  owner: string,
+  claimedUsdc: number,
+  spotPrice: number,
+): Promise<boolean> {
+  const db = await cycleDb();
+  const { data, error } = await db.rpc("reserve_cycle_claim", {
+    p_id: STATE_ID,
+    p_owner: owner,
+    p_guard_seconds: CYCLE_INTERVAL_SEC,
+    p_claimed_usdc: claimedUsdc,
+    p_spot_price: spotPrice,
+  });
+  if (error) throw new Error(`claim reserve failed: ${error.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  return !!row && (row as { id?: unknown }).id != null;
+}
+
 async function persistCycleState(state: CycleState): Promise<void> {
   const db = await cycleDb();
   const { error } = await db
@@ -1029,6 +1047,7 @@ async function runCycleStep(state?: CycleState): Promise<{
   done: boolean;
   steps: StepResult[];
   state: CycleState;
+  claimReserved?: boolean;
 }> {
   if (process.env.BOT_ENABLED !== "true") {
     return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
@@ -1074,6 +1093,7 @@ async function runCycleStep(state?: CycleState): Promise<{
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
         let claimProgressSaved = false;
+        let claimReserved = false;
 
         // Final safety gate immediately before the first transaction of a new
         // cycle. This uses the newest finalized dev-wallet signature of ANY
@@ -1093,9 +1113,22 @@ async function runCycleStep(state?: CycleState): Promise<{
           // spam-claiming the vault and shrinking the eventual buy basis.
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
+          const reserved = await reserveClaimProgress(
+            (inputState as CycleState & { leaseOwner?: string }).leaseOwner ?? "",
+            expectedClaimedUsdc,
+            spotPriceUsdcPerToken,
+          );
+          if (!reserved) {
+            throw new Error("claim already reserved by another runner — blocking duplicate claim tx");
+          }
+          claimReserved = true;
           claimProgressSaved = true;
           const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
           nextState.cooldownUntilMs = claimGuardCooldown;
+          nextState.phase = "buy";
+          nextState.claimedUsdc = expectedClaimedUsdc;
+          nextState.spotPrice = spotPriceUsdcPerToken;
+          nextState.attempts = 0;
           await persistCycleProgress({
             ...nextState,
             phase: "buy",
