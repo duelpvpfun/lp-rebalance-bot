@@ -15,11 +15,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CoinMintRouteImport } from './routes/coin.$mint'
 import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
-import { Route as ApiPublicFooRouteImport } from './routes/api/public/foo'
 import { Route as ApiPublicLaunchUploadRouteImport } from './routes/api/public/launch.upload'
 import { Route as ApiPublicLaunchStatusRouteImport } from './routes/api/public/launch.status'
 import { Route as ApiPublicLaunchPrepareRouteImport } from './routes/api/public/launch.prepare'
-import { Route as ApiPublicLaunchFooRouteImport } from './routes/api/public/launch.foo'
 
 const LaunchRoute = LaunchRouteImport.update({
   id: '/launch',
@@ -51,11 +49,6 @@ const ApiPublicRunCycleRoute = ApiPublicRunCycleRouteImport.update({
   path: '/api/public/run-cycle',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicFooRoute = ApiPublicFooRouteImport.update({
-  id: '/api/public/foo',
-  path: '/api/public/foo',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiPublicLaunchUploadRoute = ApiPublicLaunchUploadRouteImport.update({
   id: '/api/public/launch/upload',
   path: '/api/public/launch/upload',
@@ -71,21 +64,14 @@ const ApiPublicLaunchPrepareRoute = ApiPublicLaunchPrepareRouteImport.update({
   path: '/api/public/launch/prepare',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicLaunchFooRoute = ApiPublicLaunchFooRouteImport.update({
-  id: '/api/public/launch/foo',
-  path: '/api/public/launch/foo',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/coins': typeof CoinsRoute
   '/launch': typeof LaunchRoute
   '/coin/$mint': typeof CoinMintRoute
-  '/api/public/foo': typeof ApiPublicFooRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
-  '/api/public/launch/foo': typeof ApiPublicLaunchFooRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
   '/api/public/launch/upload': typeof ApiPublicLaunchUploadRoute
@@ -95,10 +81,8 @@ export interface FileRoutesByTo {
   '/coins': typeof CoinsRoute
   '/launch': typeof LaunchRoute
   '/coin/$mint': typeof CoinMintRoute
-  '/api/public/foo': typeof ApiPublicFooRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
-  '/api/public/launch/foo': typeof ApiPublicLaunchFooRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
   '/api/public/launch/upload': typeof ApiPublicLaunchUploadRoute
@@ -109,10 +93,8 @@ export interface FileRoutesById {
   '/coins': typeof CoinsRoute
   '/launch': typeof LaunchRoute
   '/coin/$mint': typeof CoinMintRoute
-  '/api/public/foo': typeof ApiPublicFooRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
-  '/api/public/launch/foo': typeof ApiPublicLaunchFooRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
   '/api/public/launch/upload': typeof ApiPublicLaunchUploadRoute
@@ -124,10 +106,8 @@ export interface FileRouteTypes {
     | '/coins'
     | '/launch'
     | '/coin/$mint'
-    | '/api/public/foo'
     | '/api/public/run-cycle'
     | '/api/public/tick'
-    | '/api/public/launch/foo'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
     | '/api/public/launch/upload'
@@ -137,10 +117,8 @@ export interface FileRouteTypes {
     | '/coins'
     | '/launch'
     | '/coin/$mint'
-    | '/api/public/foo'
     | '/api/public/run-cycle'
     | '/api/public/tick'
-    | '/api/public/launch/foo'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
     | '/api/public/launch/upload'
@@ -150,10 +128,8 @@ export interface FileRouteTypes {
     | '/coins'
     | '/launch'
     | '/coin/$mint'
-    | '/api/public/foo'
     | '/api/public/run-cycle'
     | '/api/public/tick'
-    | '/api/public/launch/foo'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
     | '/api/public/launch/upload'
@@ -164,10 +140,8 @@ export interface RootRouteChildren {
   CoinsRoute: typeof CoinsRoute
   LaunchRoute: typeof LaunchRoute
   CoinMintRoute: typeof CoinMintRoute
-  ApiPublicFooRoute: typeof ApiPublicFooRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
-  ApiPublicLaunchFooRoute: typeof ApiPublicLaunchFooRoute
   ApiPublicLaunchPrepareRoute: typeof ApiPublicLaunchPrepareRoute
   ApiPublicLaunchStatusRoute: typeof ApiPublicLaunchStatusRoute
   ApiPublicLaunchUploadRoute: typeof ApiPublicLaunchUploadRoute
@@ -217,13 +191,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicRunCycleRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/foo': {
-      id: '/api/public/foo'
-      path: '/api/public/foo'
-      fullPath: '/api/public/foo'
-      preLoaderRoute: typeof ApiPublicFooRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/public/launch/upload': {
       id: '/api/public/launch/upload'
       path: '/api/public/launch/upload'
@@ -245,13 +212,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicLaunchPrepareRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/launch/foo': {
-      id: '/api/public/launch/foo'
-      path: '/api/public/launch/foo'
-      fullPath: '/api/public/launch/foo'
-      preLoaderRoute: typeof ApiPublicLaunchFooRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -260,10 +220,8 @@ const rootRouteChildren: RootRouteChildren = {
   CoinsRoute: CoinsRoute,
   LaunchRoute: LaunchRoute,
   CoinMintRoute: CoinMintRoute,
-  ApiPublicFooRoute: ApiPublicFooRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
-  ApiPublicLaunchFooRoute: ApiPublicLaunchFooRoute,
   ApiPublicLaunchPrepareRoute: ApiPublicLaunchPrepareRoute,
   ApiPublicLaunchStatusRoute: ApiPublicLaunchStatusRoute,
   ApiPublicLaunchUploadRoute: ApiPublicLaunchUploadRoute,
