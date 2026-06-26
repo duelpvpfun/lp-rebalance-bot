@@ -45,11 +45,12 @@ import {
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const BUYBACK_PCT = 0.35;
-const PRIORITY_FEE_SOL = 0.0005;
+const PRIORITY_FEE_SOL = 0.0001;
 const SLIPPAGE_BPS = 1500;
 const POOL_SLIPPAGE_PCT = 10;
 const MAX_LP_RETRIES = 6;
 const LP_SHRINK_FACTOR = 0.85;
+const MIN_SOL_BALANCE = 0.02;
 
 // Index for the bot-owned PumpSwap pool (the one we create + seed ourselves,
 // distinct from pump.fun's canonical pool created at graduation). Override via
@@ -127,8 +128,12 @@ async function sendInstructions(
     prepend.push(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
   }
   if (!hasComputePrice) {
-    // ~0.0005 SOL on a 400k CU tx — fine for our small claim/buy/LP txs.
-    prepend.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_250_000 }));
+    // ~0.0001 SOL on a 400k CU tx — enough priority without draining SOL.
+    prepend.push(
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 400_000),
+      }),
+    );
   }
   const finalIxs = [...prepend, ...ixs];
 
@@ -626,16 +631,45 @@ function mayHaveBroadcast(steps: StepResult[]): boolean {
   );
 }
 
-async function readNewestDevWalletSignatureTsSec(
-  conn: Connection,
-  wallet: PublicKey,
+export async function readLastCycleTsSec(
+  conn?: Connection,
+  wallet?: PublicKey,
 ): Promise<number | null> {
+  const c = conn ?? new Connection(rpcUrl(), "confirmed");
+  const w = wallet ?? loadKeypair().publicKey;
   try {
-    const sigs = await conn.getSignaturesForAddress(wallet, { limit: 1 }, "finalized");
+    // Newest dev-wallet signature of ANY kind, finalized only. Do not filter by
+    // program: claim/buy/LP/burn all prove the wallet acted and must cool down.
+    const sigs = await c.getSignaturesForAddress(w, { limit: 1 }, "finalized");
     return sigs[0]?.blockTime ?? null;
   } catch {
     return null;
   }
+}
+
+async function hardStartGate(
+  conn: Connection,
+  signer: Keypair,
+  nowMs = Date.now(),
+): Promise<{ step: StepResult; state: CycleState } | null> {
+  const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
+  if (lastSigSec && nowMs - lastSigSec * 1000 < CYCLE_INTERVAL_SEC * 1000) {
+    const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
+    return {
+      step: { step: "skip", ok: true, info: { reason: "cooldown" } },
+      state: { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs },
+    };
+  }
+
+  const solBalance = (await conn.getBalance(signer.publicKey, "finalized")) / 1e9;
+  if (solBalance < MIN_SOL_BALANCE) {
+    return {
+      step: { step: "skip", ok: true, info: { reason: "low_sol" } },
+      state: abortCycleState(),
+    };
+  }
+
+  return null;
 }
 
 async function walletCooldownState(
@@ -643,7 +677,7 @@ async function walletCooldownState(
   wallet: PublicKey,
   nowMs = Date.now(),
 ): Promise<CycleState | null> {
-  const lastSigSec = await readNewestDevWalletSignatureTsSec(conn, wallet);
+  const lastSigSec = await readLastCycleTsSec(conn, wallet);
   if (!lastSigSec) return null;
   const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
   return nowMs < cooldownUntilMs
@@ -977,10 +1011,23 @@ export async function runCycleStep(state?: CycleState): Promise<{
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
-  const tokenDecimals = await getTokenDecimals(conn, mint);
 
   const inputState = state ?? freshInMemoryState();
   const isStartingNewCycle = inputState.cycleStartMs === 0;
+  if (isStartingNewCycle) {
+    const gated = await hardStartGate(conn, signer);
+    if (gated) {
+      return {
+        ok: true,
+        phase: "claim",
+        done: true,
+        steps: [gated.step],
+        state: gated.state,
+      };
+    }
+  }
+
+  const tokenDecimals = await getTokenDecimals(conn, mint);
   let nextState = startCycleIfNeeded(inputState);
   const currentPhase = nextState.phase;
   let steps: StepResult[] = [];
@@ -1154,6 +1201,11 @@ export async function runCycleStep(state?: CycleState): Promise<{
  * whole cycle should call tick() repeatedly. This just runs one step.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
+  const signer = loadKeypair();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const gated = await hardStartGate(conn, signer);
+  if (gated) return { ok: true, steps: [gated.step] };
+
   const r = await tick();
   return r.ran ? { ok: r.ok, steps: r.steps } : { ok: false, steps: [{ step: "tick", ok: false, info: r.reason }] };
 }
@@ -1216,17 +1268,23 @@ export type TickResult =
 
 export type TickStatus = Extract<TickResult, { ran: false }>;
 
-export async function readCycleStatus(): Promise<TickStatus> {
+export async function cycleStatus(): Promise<TickStatus> {
   const now = Date.now();
   const state = (await readCycleState()) ?? (await ensureCycleStateRow());
   const active = state.cycleStartMs > 0 && now - state.cycleStartMs <= STALE_CYCLE_MS;
+  const signer = loadKeypair();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
+  const secondsUntilNext = lastSigSec
+    ? Math.max(0, lastSigSec + CYCLE_INTERVAL_SEC - Math.floor(now / 1000))
+    : 0;
 
   if (active) {
     return {
       ran: false,
       reason: "in_flight",
       phase: state.phase,
-      secondsUntilNext: 3,
+      secondsUntilNext,
     };
   }
 
@@ -1234,8 +1292,12 @@ export async function readCycleStatus(): Promise<TickStatus> {
     ran: false,
     reason: "cooldown",
     phase: "idle",
-    secondsUntilNext: Math.max(1, Math.ceil((state.cooldownUntilMs - now) / 1000)),
+    secondsUntilNext,
   };
+}
+
+export async function readCycleStatus(): Promise<TickStatus> {
+  return cycleStatus();
 }
 
 export async function tick(): Promise<TickResult> {
