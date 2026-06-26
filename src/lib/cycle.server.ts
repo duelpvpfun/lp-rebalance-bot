@@ -20,6 +20,7 @@ import {
   PumpSdk,
   OnlinePumpSdk,
   bondingCurvePda,
+  creatorVaultPda,
   getBuyTokenAmountFromSolAmount,
 } from "@pump-fun/pump-sdk";
 import {
@@ -166,14 +167,27 @@ async function runBondingCurveCycle(
   // STEP 1: claim USDC creator fees (quote-mint-aware V2 claim).
   const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   try {
-    const claimable = await onlinePumpSdk
-      .getCreatorVaultBalanceBothPrograms(creator)
-      .catch(() => new BN(0));
+    // Read the *USDC* creator-fee vault directly. (getCreatorVaultBalance*
+    // reads the native/SOL vault, which is 0 for USDC-quoted coins — that's a
+    // display-only quirk; the V2 claim below still targets the right ATA.)
+    const creatorVaultAuthority = creatorVaultPda(creator);
+    const creatorVaultUsdcAta = getAssociatedTokenAddressSync(
+      usdcPk,
+      creatorVaultAuthority,
+      true,
+      TOKEN_PROGRAM_ID,
+    );
+    const claimableUsdc = await getTokenAccountUiBalance(conn, creatorVaultUsdcAta);
     steps.push({
       step: "claimable_usdc_vault",
       ok: true,
-      info: { raw: claimable.toString() },
+      info: { usdc: claimableUsdc, vault: creatorVaultUsdcAta.toBase58() },
     });
+
+    if (claimableUsdc < 0.000001) {
+      steps.push({ step: "skip", ok: true, info: "no USDC creator rewards in bonding-curve vault" });
+      return { ok: true, steps };
+    }
 
     const claimIxs = await onlinePumpSdk.collectCoinCreatorFeeV2Instructions(
       creator,
