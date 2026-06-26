@@ -501,11 +501,29 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       const binary = atob(b64);
       const raw = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) raw[i] = binary.charCodeAt(i);
-      const { Transaction } = await loadWeb3();
-      const tx = Transaction.from(raw);
+
+      // Ensure Buffer exists globally before web3.js touches it internally.
+      if (typeof (globalThis as any).Buffer?.from !== "function") {
+        const mod: any = await import("buffer");
+        const BufferCtor = mod.Buffer ?? mod.default?.Buffer;
+        (globalThis as any).Buffer = BufferCtor;
+        (window as any).Buffer = BufferCtor;
+      }
+
+      const web3 = await loadWeb3();
+      const { Transaction, VersionedTransaction } = web3;
+
+      // Try versioned first (v0 messages), then fall back to legacy.
+      let tx: any;
+      try {
+        tx = VersionedTransaction.deserialize(raw);
+      } catch {
+        tx = Transaction.from(raw);
+      }
       const signed = await signTransaction(tx);
       const connection = await getConnection();
       const sig = await connection.sendRawTransaction(signed.serialize());
+
       setFundSig(sig);
       toast.success("Funding tx sent");
       await connection.confirmTransaction(sig, "confirmed");
