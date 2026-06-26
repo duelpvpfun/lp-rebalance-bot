@@ -22,6 +22,7 @@ import { useLaunchWallet } from "@/components/WalletProvider";
 import {
   fetchFundingTx,
   slugify,
+  WORKER_BASE_PUBLIC,
   type PrepareResult,
   type LaunchStatus,
 } from "@/lib/launch-client";
