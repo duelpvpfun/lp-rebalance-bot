@@ -2,7 +2,7 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
-import type { Plugin } from "vite";
+import { perEnvironmentPlugin, type Plugin } from "vite";
 
 // Some @solana/* v2 packages only declare `browser`/`node` export conditions
 // (no `workerd`/`default`), and the workerd build can't pick a file. The v6
@@ -60,17 +60,15 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
-function browserNodePolyfills(): Plugin[] {
-  return nodePolyfills({
-    include: ["buffer", "process"],
-    globals: { Buffer: true, global: true, process: true },
-    protocolImports: true,
-  }).map((plugin) => ({
-    ...plugin,
-    applyToEnvironment(environment) {
-      return environment.name === "client";
-    },
-  }));
+function browserNodePolyfills(): Plugin {
+  return perEnvironmentPlugin("browser-node-polyfills", (environment) => {
+    if (environment.name !== "client") return false;
+    return nodePolyfills({
+      include: ["buffer", "process"],
+      globals: { Buffer: true, global: true, process: true },
+      protocolImports: true,
+    });
+  });
 }
 
 const sharedAlias = {
@@ -85,12 +83,7 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [solanaServerAliasPlugin()],
-    environments: {
-      client: {
-        plugins: browserNodePolyfills(),
-      },
-    },
+    plugins: [solanaServerAliasPlugin(), browserNodePolyfills()],
     define: {
       global: "globalThis",
     },
