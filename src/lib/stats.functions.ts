@@ -2,23 +2,23 @@ import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 
-const RPC_URL = process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+function rpcUrl(): string {
+  const helius = process.env.HELIUS_API_KEY;
+  if (helius) return `https://mainnet.helius-rpc.com/?api-key=${helius}`;
+  return process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+}
 
-// Known program IDs we want to label nicely.
-const PROGRAM_LABELS: Record<string, string> = {
-  "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": "PumpSwap LP",
-  "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "Pump.fun Claim",
-  "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter Swap",
-  "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB": "Jupiter Swap",
-};
+// Only these on-chain actions are surfaced in the activity feed.
+const PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+const PUMP_FUN = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+const JUPITER_V4 = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
 
-function loadPubkey(): string {
-  const pk = process.env.DEV_WALLET_PRIVATE_KEY;
-  if (!pk) throw new Error("DEV_WALLET_PRIVATE_KEY missing");
-  const kp = pk.trim().startsWith("[")
-    ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(pk)))
-    : Keypair.fromSecretKey(bs58.decode(pk.trim()));
-  return kp.publicKey.toBase58();
+function labelFor(programIds: string[]): "Claim Creator Rewards" | "Buy $LIQUIDITTY" | "Add Liquidity" | null {
+  if (programIds.includes(PUMP_AMM)) return "Add Liquidity";
+  if (programIds.includes(JUPITER_V6) || programIds.includes(JUPITER_V4)) return "Buy $LIQUIDITTY";
+  if (programIds.includes(PUMP_FUN)) return "Claim Creator Rewards";
+  return null;
 }
 
 export type DexStats = {
@@ -43,7 +43,18 @@ export type StatsPayload = {
   devWallet: string;
   dex: DexStats;
   txs: WalletTx[];
+  lastCycleAt: number | null; // unix seconds — newest claim/buy/LP tx
+  cycleIntervalSec: number;
 };
+
+function loadPubkey(): string {
+  const pk = process.env.DEV_WALLET_PRIVATE_KEY;
+  if (!pk) throw new Error("DEV_WALLET_PRIVATE_KEY missing");
+  const kp = pk.trim().startsWith("[")
+    ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(pk)))
+    : Keypair.fromSecretKey(bs58.decode(pk.trim()));
+  return kp.publicKey.toBase58();
+}
 
 async function fetchDex(mint: string): Promise<DexStats> {
   try {
@@ -51,7 +62,6 @@ async function fetchDex(mint: string): Promise<DexStats> {
     if (!r.ok) throw new Error(`${r.status}`);
     const j = (await r.json()) as { pairs?: Array<Record<string, unknown>> };
     const pairs = j.pairs ?? [];
-    // Prefer PumpSwap USDC pair
     const pair =
       pairs.find(
         (p) =>
@@ -79,43 +89,38 @@ async function fetchDex(mint: string): Promise<DexStats> {
 }
 
 async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
-  const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 15 });
-  // Parse top 8 to get a program label; cheaper than parsing all.
-  const out: WalletTx[] = [];
-  const toParse = sigs.slice(0, 8);
+  // Look back further so we can filter down to just claim / buy / LP.
+  const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 40 });
   const parsed = await Promise.all(
-    toParse.map((s) =>
+    sigs.map((s) =>
       conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 }).catch(() => null),
     ),
   );
-  toParse.forEach((s, i) => {
+  const out: WalletTx[] = [];
+  for (let i = 0; i < sigs.length; i++) {
+    const s = sigs[i];
     const tx = parsed[i];
-    let label = "Tx";
-    if (tx) {
-      const ix = tx.transaction.message.instructions ?? [];
-      for (const inst of ix) {
-        const pid = (inst as { programId?: PublicKey }).programId?.toBase58();
-        if (pid && PROGRAM_LABELS[pid]) {
-          label = PROGRAM_LABELS[pid];
-          break;
-        }
+    if (!tx) continue;
+    const pids = new Set<string>();
+    for (const ix of tx.transaction.message.instructions ?? []) {
+      const pid = (ix as { programId?: PublicKey }).programId?.toBase58();
+      if (pid) pids.add(pid);
+    }
+    for (const inner of tx.meta?.innerInstructions ?? []) {
+      for (const ix of inner.instructions ?? []) {
+        const pid = (ix as { programId?: PublicKey }).programId?.toBase58();
+        if (pid) pids.add(pid);
       }
     }
+    const label = labelFor([...pids]);
+    if (!label) continue;
     out.push({
       signature: s.signature,
       blockTime: s.blockTime ?? null,
       label,
       success: !s.err,
     });
-  });
-  // Add rest as plain Tx
-  for (const s of sigs.slice(8)) {
-    out.push({
-      signature: s.signature,
-      blockTime: s.blockTime ?? null,
-      label: "Tx",
-      success: !s.err,
-    });
+    if (out.length >= 20) break;
   }
   return out;
 }
@@ -124,8 +129,8 @@ export const getStats = createServerFn({ method: "GET" }).handler(async (): Prom
   const mint = process.env.TOKEN_MINT_ADDRESS;
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const devWallet = loadPubkey();
-  const conn = new Connection(RPC_URL, "confirmed");
-
+  const conn = new Connection(rpcUrl(), "confirmed");
   const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet)]);
-  return { mint, devWallet, dex, txs };
+  const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
+  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 300 };
 });
