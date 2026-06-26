@@ -470,10 +470,11 @@ export async function getCachedStats(): Promise<StatsPayload> {
     return statsCache.payload;
   }
   if (statsInflight) {
-    // Don't make extra visitors wait on the upstream fan-out — hand them the
-    // last known good payload while the single in-flight refresh runs.
+    // One refresh is already running. Reuse it instead of serving the same
+    // stale payload forever; the homepage query keeps the old UI visible while
+    // this request resolves.
     if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS + STATS_STALE_GRACE_MS) {
-      return statsCache.payload;
+      return statsInflight.catch(() => statsCache!.payload);
     }
     return statsInflight;
   }
@@ -489,7 +490,8 @@ export async function getCachedStats(): Promise<StatsPayload> {
       statsInflight = null;
     }
   })();
-  // First-ever request: must await. Subsequent requests within TTL use cache above.
-  if (!statsCache) return statsInflight;
-  return statsCache.payload;
+  // In the serverless runtime, unawaited background work can be cancelled when
+  // the response ends. Await stale refreshes so market cap + activity actually
+  // advance after the TTL instead of getting stuck on the old cache forever.
+  return statsInflight;
 }
