@@ -17,7 +17,7 @@ const CORS = {
 async function status() {
   try {
     const result = await cycleStatus();
-    return Response.json({ ran: false, ...result }, { headers: CORS });
+    return Response.json(result, { headers: CORS });
   } catch (e) {
     return Response.json(
       { ran: false, error: (e as Error).message },
