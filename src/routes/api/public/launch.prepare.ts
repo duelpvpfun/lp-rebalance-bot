@@ -4,6 +4,10 @@ export const Route = createFileRoute("/api/public/launch/prepare")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        console.log(
+          "WORKER_BASE_URL=",
+          JSON.stringify(process.env.WORKER_BASE_URL),
+        );
         try {
           const base = (process.env.WORKER_BASE_URL || "")
             .trim()
@@ -36,8 +40,13 @@ export const Route = createFileRoute("/api/public/launch/prepare")({
             headers: { "content-type": "application/json" },
           });
         } catch (e) {
+          console.error("launch/prepare proxy error:", e);
           return new Response(
-            JSON.stringify({ error: "proxy_failed", detail: String(e) }),
+            JSON.stringify({
+              error: "proxy_failed",
+              detail:
+                e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+            }),
             { status: 502, headers: { "content-type": "application/json" } },
           );
         }
