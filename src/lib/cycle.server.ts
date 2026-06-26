@@ -456,7 +456,7 @@ const MAX_STEP_ATTEMPTS = 4;
 const STATE_ID = "liquititty-auto-lp";
 const LEASE_SECONDS = 35;
 const STALE_CYCLE_MS = 5 * 60 * 1000;
-const MIN_CLAIM_USDC = 0.05;
+const MIN_CLAIM_USDC = 0.01;
 
 type CycleState = {
   phase: Phase;
