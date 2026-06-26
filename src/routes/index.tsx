@@ -38,6 +38,8 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  const { data } = useSuspenseQuery(statsQuery);
+  const buyUrl = data.mint ? `https://pump.fun/coin/${data.mint}` : "https://pump.fun";
   return (
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -55,7 +57,7 @@ function Index() {
           <CommunityIcon />
           <a
             id="buy"
-            href="https://pump.fun"
+            href={buyUrl}
             target="_blank"
             rel="noreferrer"
             className="rounded-full bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-lg transition hover:scale-105"
