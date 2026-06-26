@@ -114,6 +114,11 @@ export type StatsPayload = {
   txs: WalletTx[];
   lastCycleAt: number | null; // unix seconds — newest claim/buy/LP tx
   cycleIntervalSec: number;
+  cycleRuntime: {
+    phase: "claim" | "buy" | "lp" | "burn" | "idle";
+    cycleStartAt: number | null;
+    cooldownUntil: number | null;
+  };
 };
 
 function loadPubkey(): string {
@@ -319,16 +324,38 @@ async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise
   return out;
 }
 
+async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("cycle_runtime_state")
+      .select("phase, cycle_start_at, cooldown_until")
+      .eq("id", "liquititty-auto-lp")
+      .maybeSingle();
+    if (error || !data) throw error ?? new Error("no runtime row");
+    const cycleStartAt = data.cycle_start_at ? Math.floor(Date.parse(data.cycle_start_at) / 1000) : null;
+    const cooldownUntil = data.cooldown_until ? Math.floor(Date.parse(data.cooldown_until) / 1000) : null;
+    return {
+      phase: cycleStartAt ? (data.phase as "claim" | "buy" | "lp" | "burn") : "idle",
+      cycleStartAt,
+      cooldownUntil,
+    };
+  } catch {
+    return { phase: "idle", cycleStartAt: null, cooldownUntil: null };
+  }
+}
+
 export const getStats = createServerFn({ method: "GET" }).handler(
   async (): Promise<StatsPayload> => {
     const mint = process.env.TOKEN_MINT_ADDRESS;
     if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
     const devWallet = loadPubkey();
     const conn = new Connection(rpcUrl(), "confirmed");
-    const [dexRaw, onchain, txs] = await Promise.all([
+    const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
       fetchDex(mint),
       fetchOnchainPool(conn, mint),
       fetchTxs(conn, devWallet, mint),
+      fetchCycleRuntime(),
     ]);
 
     // Prefer live on-chain pool reserves; fall back to DexScreener per-field so a
@@ -344,6 +371,6 @@ export const getStats = createServerFn({ method: "GET" }).handler(
     };
 
     const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
-    return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60 };
+    return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60, cycleRuntime };
   },
 );
