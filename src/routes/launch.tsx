@@ -1006,7 +1006,13 @@ function ImageDrop({
       }}
       role="button"
       tabIndex={0}
-      onClick={() => inputRef.current?.click()}
+      onClick={(e) => {
+        // Field wraps us in a <label>; prevent the label's native click from
+        // also opening the file picker (double-open closes the first one).
+        e.preventDefault();
+        e.stopPropagation();
+        inputRef.current?.click();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
