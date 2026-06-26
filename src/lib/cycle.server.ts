@@ -619,7 +619,7 @@ async function stepClaim(
   signer: Keypair,
   mint: string,
   tokenDecimals: number,
-  afterBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken) => Promise<void>,
+  afterBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken: number) => Promise<void>,
 ): Promise<{
   results: StepResult[];
   claimedUsdc: number;
