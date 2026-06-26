@@ -231,14 +231,15 @@ function CoinPage() {
               <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-accent">
                 Dev wallet activity
               </h2>
-              <div className="overflow-hidden rounded-md border border-border">
+              <div className="overflow-x-auto rounded-md border border-border">
                 {activity.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">
                     no cycle activity yet
                   </div>
                 )}
                 {activity.length > 0 && (
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full min-w-[640px] text-left text-sm">
+
                     <thead className="bg-secondary/40 text-[11px] uppercase tracking-wider text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2">Step</th>
