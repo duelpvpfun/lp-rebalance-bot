@@ -41,6 +41,15 @@ type ParsedTx = {
   transaction?: { message?: { instructions?: unknown[] } };
 };
 
+const CYCLE_LABEL_ORDER = {
+  "Claim USDC Creator Rewards": 1,
+  "Swap 35% USDC → $LIQUITITTY": 2,
+  "Add TOKEN + USDC to LP": 3,
+  "Burn LP Tokens": 4,
+} as const;
+
+type CycleLabel = keyof typeof CYCLE_LABEL_ORDER;
+
 function tokenDelta(tx: ParsedTx, owner: string, mint: string): number {
   const pre = (tx.meta?.preTokenBalances ?? []).filter((b) => b.owner === owner && b.mint === mint);
   const post = (tx.meta?.postTokenBalances ?? []).filter(
@@ -61,31 +70,32 @@ function classify(
   wallet: string,
   mint: string,
   lpMint: string,
-): string | null {
+): CycleLabel | null {
   const tokenD = tokenDelta(tx, wallet, mint);
   const usdcD = tokenDelta(tx, wallet, USDC_MINT);
   const lpD = tokenDelta(tx, wallet, lpMint);
+  const dust = 0.0000001;
 
   const touchesPump = programIds.has(PUMP_FUN) || programIds.has(PUMP_AMM);
   const touchesJup = programIds.has(JUPITER_V6) || programIds.has(JUPITER_V4);
 
-  // 0) Burn LP — our LP token balance dropped to/towards zero and no token/USDC
-  //    moved (pure burn). This is the "liquidity locked forever" receipt.
-  if (lpD < 0 && tokenD === 0 && usdcD === 0) return "Burn LP (locked forever)";
+  // 4) Burn LP — LP token balance drops after deposit, locking liquidity.
+  if (lpD < -dust) return "Burn LP Tokens";
 
-  // 1) Claim Creator Rewards — USDC came in, no token movement, pump program
-  //    touched (works for both bonding-curve and AMM claims).
-  if (touchesPump && usdcD > 0 && tokenD === 0) return "Claim Creator Rewards";
-
-  // 2) Buy $LIQUITITTY — USDC out, token in. Covers bonding-curve buys
-  //    (PUMP_FUN), AMM buys (PUMP_AMM) and Jupiter.
-  if ((touchesJup || touchesPump) && tokenD > 0 && usdcD < 0) {
-    return "Buy $LIQUITITTY";
+  // 1) Claim Creator Rewards — USDC comes in with no token movement.
+  if (touchesPump && usdcD > dust && Math.abs(tokenD) <= dust) {
+    return "Claim USDC Creator Rewards";
   }
 
-  // 3) Add Liquidity — both token and USDC leave wallet via PumpSwap (AMM only;
-  //    there is no LP add before graduation).
-  if (programIds.has(PUMP_AMM) && tokenD < 0 && usdcD < 0) return "Add Liquidity";
+  // 2) Swap/buyback — USDC leaves and $LIQUITITTY enters the dev wallet.
+  if ((touchesJup || touchesPump) && tokenD > dust && usdcD < -dust) {
+    return "Swap 35% USDC → $LIQUITITTY";
+  }
+
+  // 3) Add Liquidity — token + USDC leave wallet through PumpSwap and LP is minted.
+  if (programIds.has(PUMP_AMM) && tokenD < -dust && usdcD < -dust) {
+    return "Add TOKEN + USDC to LP";
+  }
 
   return null;
 }
@@ -103,7 +113,7 @@ export type DexStats = {
 export type WalletTx = {
   signature: string;
   blockTime: number | null;
-  label: string;
+  label: CycleLabel;
   success: boolean;
 };
 
@@ -319,9 +329,15 @@ async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise
       label,
       success: !s.err,
     });
-    if (out.length >= 20) break;
   }
-  return out;
+  return out
+    .sort((a, b) => {
+      const timeA = a.blockTime ?? 0;
+      const timeB = b.blockTime ?? 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return CYCLE_LABEL_ORDER[a.label] - CYCLE_LABEL_ORDER[b.label];
+    })
+    .slice(0, 20);
 }
 
 async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
