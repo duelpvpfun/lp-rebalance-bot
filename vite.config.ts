@@ -60,6 +60,19 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
+function browserNodePolyfills(): Plugin[] {
+  return nodePolyfills({
+    include: ["buffer", "process"],
+    globals: { Buffer: true, global: true, process: true },
+    protocolImports: true,
+  }).map((plugin) => ({
+    ...plugin,
+    applyToEnvironment(environment) {
+      return environment.name === "client";
+    },
+  }));
+}
+
 const sharedAlias = {
   "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
@@ -74,11 +87,7 @@ export default defineConfig({
   vite: {
     plugins: [
       solanaServerAliasPlugin(),
-      nodePolyfills({
-        include: ["buffer", "process"],
-        globals: { Buffer: true, global: true, process: true },
-        protocolImports: true,
-      }),
+      ...browserNodePolyfills(),
     ],
     define: {
       global: "globalThis",
