@@ -252,7 +252,7 @@ function StatsBar() {
         <LiveBlock label="$LIQUITITTY in LP" value={fmtNum(d.liquidityToken)} />
       </div>
       <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-        Live · refreshes every 30s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}
+        Live · refreshes every 6s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}
         {d.pairUrl ? (
           <a className="underline" target="_blank" rel="noreferrer" href={d.pairUrl}>chart</a>
         ) : ("no pair yet")}
