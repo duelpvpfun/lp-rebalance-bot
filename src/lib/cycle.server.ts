@@ -710,11 +710,13 @@ async function stepClaim(
 ): Promise<{
   results: StepResult[];
   claimedUsdc: number;
+  expectedClaimableUsdc: number;
   spotPriceUsdcPerToken: number;
   skip: boolean;
   ok: boolean;
 }> {
   const out: StepResult[] = [];
+  let expectedClaimableUsdc = 0;
   const mintPk = new PublicKey(mint);
   const usdcPk = new PublicKey(USDC_MINT);
   const user = signer.publicKey;
@@ -749,7 +751,7 @@ async function stepClaim(
           ok: false,
           error: `dev wallet ${pubkey} is not the token creator ${creator.toBase58()} — cannot claim`,
         });
-        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: false };
+        return { results: out, claimedUsdc: 0, expectedClaimableUsdc, spotPriceUsdcPerToken, skip: true, ok: false };
       }
       const creatorVaultAuthority = creatorVaultPda(creator);
       const creatorVaultUsdcAta = getAssociatedTokenAddressSync(
@@ -759,6 +761,7 @@ async function stepClaim(
         TOKEN_PROGRAM_ID,
       );
       const claimableUsdc = await getTokenAccountUiBalance(conn, creatorVaultUsdcAta);
+      expectedClaimableUsdc = claimableUsdc;
       out.push({
         step: "claimable_usdc_vault",
         ok: true,
@@ -770,7 +773,7 @@ async function stepClaim(
           ok: true,
           info: `bonding-curve vault below ${MIN_CLAIM_USDC} USDC (${claimableUsdc}); skipping cycle to avoid dust spam`,
         });
-        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
+        return { results: out, claimedUsdc: 0, expectedClaimableUsdc, spotPriceUsdcPerToken, skip: true, ok: true };
       }
       const onlinePumpSdk = new OnlinePumpSdk(conn);
       const claimIxs = await onlinePumpSdk.collectCoinCreatorFeeV2Instructions(
@@ -806,7 +809,7 @@ async function stepClaim(
           ok: false,
           error: `dev wallet ${pubkey} is not the pool coinCreator ${coinCreator.toBase58()} — cannot claim`,
         });
-        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: false };
+        return { results: out, claimedUsdc: 0, expectedClaimableUsdc, spotPriceUsdcPerToken, skip: true, ok: false };
       }
       const coinCreatorVaultAuthority = coinCreatorVaultAuthorityPda(coinCreator);
       const coinCreatorVaultAta = coinCreatorVaultAtaPda(
@@ -821,6 +824,7 @@ async function stepClaim(
         quoteTokenProgram,
       );
       const vaultUsdc = await getTokenAccountUiBalance(conn, coinCreatorVaultAta);
+      expectedClaimableUsdc = vaultUsdc;
       out.push({
         step: "claimable_usdc_vault",
         ok: true,
@@ -832,7 +836,7 @@ async function stepClaim(
           ok: true,
           info: `PumpSwap vault below ${MIN_CLAIM_USDC} USDC (${vaultUsdc}); skipping cycle to avoid dust spam`,
         });
-        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
+        return { results: out, claimedUsdc: 0, expectedClaimableUsdc, spotPriceUsdcPerToken, skip: true, ok: true };
       }
       const [coinCreatorVaultAtaAccountInfo, coinCreatorTokenAccountInfo] =
         await conn.getMultipleAccountsInfo([coinCreatorVaultAta, coinCreatorTokenAccount]);
@@ -876,14 +880,19 @@ async function stepClaim(
     }
   } catch (e) {
     out.push({ step: "claim", ok: false, error: (e as Error).message });
-    return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: false, ok: false };
+    return { results: out, claimedUsdc: 0, expectedClaimableUsdc, spotPriceUsdcPerToken, skip: false, ok: false };
   }
 
   // Claim confirmed → USDC is in our ATA. Compute the delta to size the buy.
   const usdcAfter = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   const claimedUsdc = Math.max(0, usdcAfter - usdcBefore);
-  out.push({ step: "claimed_amount", ok: true, info: { usdc: claimedUsdc } });
-  return { results: out, claimedUsdc, spotPriceUsdcPerToken, skip: false, ok: true };
+  const claimBasisUsdc = Math.max(claimedUsdc, expectedClaimableUsdc);
+  out.push({
+    step: "claimed_amount",
+    ok: true,
+    info: { usdc: claimedUsdc, expectedUsdc: expectedClaimableUsdc, buyBasisUsdc: claimBasisUsdc },
+  });
+  return { results: out, claimedUsdc: claimBasisUsdc, expectedClaimableUsdc, spotPriceUsdcPerToken, skip: false, ok: true };
 }
 
 /* ----------------- STEP 2: buy 35% of claimed USDC into token ----------------- */
@@ -1030,7 +1039,7 @@ async function runCycleStep(state?: CycleState): Promise<{
   const conn = new Connection(rpcUrl(), "confirmed");
 
   const inputState = state ?? freshInMemoryState();
-  const isStartingNewCycle = inputState.cycleStartMs === 0;
+  const isStartingNewCycle = inputState.phase === "claim" && inputState.claimedUsdc <= 0 && inputState.attempts === 0;
   if (isStartingNewCycle) {
     const gated = await hardStartGate(conn, signer);
     if (gated) {
@@ -1046,6 +1055,14 @@ async function runCycleStep(state?: CycleState): Promise<{
 
   const tokenDecimals = await getTokenDecimals(conn, mint);
   let nextState = startCycleIfNeeded(inputState);
+  if (isStartingNewCycle) {
+    // Mark the cycle active immediately after the hard gates pass, before any
+    // network-heavy SDK calls or tx building. This makes the DB/UI source of
+    // truth show "running" and prevents any caller from seeing an expired idle
+    // row while the claim step is preparing.
+    nextState.cooldownUntilMs = Date.now() + CYCLE_INTERVAL_SEC * 1000;
+    await persistCycleProgress(nextState);
+  }
   const currentPhase = nextState.phase;
   let steps: StepResult[] = [];
   let stepOk = false;
@@ -1056,6 +1073,7 @@ async function runCycleStep(state?: CycleState): Promise<{
       case "claim": {
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
+        let claimProgressSaved = false;
 
         // Final safety gate immediately before the first transaction of a new
         // cycle. This uses the newest finalized dev-wallet signature of ANY
@@ -1075,6 +1093,7 @@ async function runCycleStep(state?: CycleState): Promise<{
           // spam-claiming the vault and shrinking the eventual buy basis.
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
+          claimProgressSaved = true;
           const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
           nextState.cooldownUntilMs = claimGuardCooldown;
           await persistCycleProgress({
@@ -1105,11 +1124,11 @@ async function runCycleStep(state?: CycleState): Promise<{
           }
           stepOk = true;
         } else {
-          if (mayHaveBroadcast(steps)) {
+          if (claimProgressSaved || mayHaveBroadcast(steps)) {
             steps.push({
               step: "claim_confirmation_unknown",
               ok: true,
-              info: "claim tx was broadcast but confirmation timed out; advancing to buy instead of claiming again",
+              info: "claim progress was saved before send/confirm failed; advancing to buy instead of claiming again",
             });
             nextState.claimedUsdc = broadcastClaimedUsdc;
             nextState.spotPrice = broadcastSpotPrice;
@@ -1384,7 +1403,7 @@ export async function tick(): Promise<TickResult> {
     return { ran: false, reason: locked.cycleStartMs > 0 ? "in_flight" : "cooldown", phase: lastKnownPhase, secondsUntilNext };
   }
 
-  const atStartOfCycle = leasedState.cycleStartMs === 0;
+  const atStartOfCycle = leasedState.phase === "claim" && leasedState.claimedUsdc <= 0 && leasedState.attempts === 0;
 
   if (atStartOfCycle) {
     const signer = loadKeypair();

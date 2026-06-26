@@ -10,7 +10,7 @@ import { cycleStatus, tick } from "@/lib/cycle.server";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-cron-secret",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-liquititty-live-timer",
 };
 
 async function status() {
@@ -42,7 +42,16 @@ export const Route = createFileRoute("/api/public/tick")({
     handlers: {
       OPTIONS: async () => new Response(null, { status: 204, headers: CORS }),
       GET: async () => status(),
-      POST: async () => advance(),
+      POST: async ({ request }) => {
+        const isLiveTimer = request.headers.get("x-liquititty-live-timer") === "1";
+        if (!isLiveTimer) {
+          return Response.json(
+            { ran: false, blocked: true, reason: "timer_header_missing" },
+            { status: 403, headers: CORS },
+          );
+        }
+        return advance();
+      },
     },
   },
 });
