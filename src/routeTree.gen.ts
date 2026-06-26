@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LaunchRouteImport } from './routes/launch'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as LaunchCreateRouteImport } from './routes/launch.create'
 import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
 
@@ -24,11 +23,6 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
-} as any)
-const LaunchCreateRoute = LaunchCreateRouteImport.update({
-  id: '/create',
-  path: '/create',
-  getParentRoute: () => LaunchRoute,
 } as any)
 const ApiPublicTickRoute = ApiPublicTickRouteImport.update({
   id: '/api/public/tick',
@@ -43,53 +37,39 @@ const ApiPublicRunCycleRoute = ApiPublicRunCycleRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/launch': typeof LaunchRouteWithChildren
-  '/launch/create': typeof LaunchCreateRoute
+  '/launch': typeof LaunchRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/launch': typeof LaunchRouteWithChildren
-  '/launch/create': typeof LaunchCreateRoute
+  '/launch': typeof LaunchRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/launch': typeof LaunchRouteWithChildren
-  '/launch/create': typeof LaunchCreateRoute
+  '/launch': typeof LaunchRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/launch'
-    | '/launch/create'
-    | '/api/public/run-cycle'
-    | '/api/public/tick'
+  fullPaths: '/' | '/launch' | '/api/public/run-cycle' | '/api/public/tick'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/launch'
-    | '/launch/create'
-    | '/api/public/run-cycle'
-    | '/api/public/tick'
+  to: '/' | '/launch' | '/api/public/run-cycle' | '/api/public/tick'
   id:
     | '__root__'
     | '/'
     | '/launch'
-    | '/launch/create'
     | '/api/public/run-cycle'
     | '/api/public/tick'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  LaunchRoute: typeof LaunchRouteWithChildren
+  LaunchRoute: typeof LaunchRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
 }
@@ -110,13 +90,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/launch/create': {
-      id: '/launch/create'
-      path: '/create'
-      fullPath: '/launch/create'
-      preLoaderRoute: typeof LaunchCreateRouteImport
-      parentRoute: typeof LaunchRoute
-    }
     '/api/public/tick': {
       id: '/api/public/tick'
       path: '/api/public/tick'
@@ -134,20 +107,9 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface LaunchRouteChildren {
-  LaunchCreateRoute: typeof LaunchCreateRoute
-}
-
-const LaunchRouteChildren: LaunchRouteChildren = {
-  LaunchCreateRoute: LaunchCreateRoute,
-}
-
-const LaunchRouteWithChildren =
-  LaunchRoute._addFileChildren(LaunchRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  LaunchRoute: LaunchRouteWithChildren,
+  LaunchRoute: LaunchRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
 }
