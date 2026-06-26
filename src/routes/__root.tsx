@@ -1,4 +1,4 @@
-import "../lib/browser-polyfills";
+import { installBrowserPolyfills } from "../lib/browser-polyfills";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -14,6 +14,8 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { WalletProvider } from "../components/WalletProvider";
 import { Toaster } from "@/components/ui/sonner";
+
+installBrowserPolyfills();
 
 function NotFoundComponent() {
   return (
