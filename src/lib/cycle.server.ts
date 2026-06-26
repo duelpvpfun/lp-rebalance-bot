@@ -433,6 +433,7 @@ type Phase = "claim" | "buy" | "lp" | "burn";
 const MAX_STEP_ATTEMPTS = 4;
 const STATE_ID = "liquititty-auto-lp";
 const LEASE_SECONDS = 35;
+const STALE_CYCLE_MS = 5 * 60 * 1000;
 
 type CycleState = {
   phase: Phase;
@@ -587,6 +588,12 @@ function freshInMemoryState(): CycleState {
     spotPrice: 0,
     attempts: 0,
   };
+}
+
+function mayHaveBroadcast(steps: StepResult[]): boolean {
+  return steps.some(
+    (s) => typeof s.error === "string" && /tx\s+[1-9A-HJ-NP-Za-km-z]{32,}\s+did not confirm/i.test(s.error),
+  );
 }
 
 
