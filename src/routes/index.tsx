@@ -131,7 +131,7 @@ function Index() {
             A liquidity pool is just two buckets: one with $LIQUITITTY and one with USDC.
             People trade between them. Every trade pays a tiny fee, and pump.fun gives
             those fees to the coin's creator. Most coins, the creator pockets them.
-            $LIQUITITTY doesn't. A bot does this on a 1-minute loop:
+            $LIQUITITTY doesn't. A bot does this on a 2-minute loop:
           </p>
         </div>
 
