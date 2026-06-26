@@ -266,6 +266,7 @@ async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial
 async function fetchBondingCurveStats(conn: Connection, mint: string): Promise<Partial<DexStats>> {
   try {
     const mintPk = new PublicKey(mint);
+    const { PumpSdk, bondingCurvePda } = await pump();
     const sdk = new PumpSdk();
     const bcInfo = await conn.getAccountInfo(bondingCurvePda(mintPk));
     if (!bcInfo) return {};
