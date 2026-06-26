@@ -1,13 +1,20 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import {
-  OnlinePumpAmmSdk,
-  canonicalPumpPoolPda,
-  poolPda,
-  lpMintPda,
-} from "@pump-fun/pump-swap-sdk";
-import { PumpSdk, bondingCurvePda } from "@pump-fun/pump-sdk";
+// Pump SDKs are heavy and pull in @solana/kit which mismatches with other
+// transitive @solana/errors versions in the browser bundle. They're only
+// needed inside server-function handlers, so we dynamic-import them with
+// /* @vite-ignore */ so they never get bundled into the client.
+type PumpSwapMod = typeof import("@pump-fun/pump-swap-sdk");
+type PumpMod = typeof import("@pump-fun/pump-sdk");
+const PUMP_SWAP_PKG = "@pump-fun/pump-swap-sdk";
+const PUMP_PKG = "@pump-fun/pump-sdk";
+let _pumpSwap: Promise<PumpSwapMod> | null = null;
+let _pump: Promise<PumpMod> | null = null;
+const pumpSwap = (): Promise<PumpSwapMod> =>
+  (_pumpSwap ??= import(/* @vite-ignore */ PUMP_SWAP_PKG) as Promise<PumpSwapMod>);
+const pump = (): Promise<PumpMod> =>
+  (_pump ??= import(/* @vite-ignore */ PUMP_PKG) as Promise<PumpMod>);
 
 const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
 
@@ -207,6 +214,7 @@ async function readPoolReserves(
 ): Promise<Partial<DexStats> | null> {
   try {
     const mintPk = new PublicKey(mint);
+    const { OnlinePumpAmmSdk } = await pumpSwap();
     const sdk = new OnlinePumpAmmSdk(conn);
     const pool = await sdk.fetchPool(poolPk);
     const [baseBal, quoteBal, tokenSupply] = await Promise.all([
@@ -233,6 +241,7 @@ async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial
   const devWallet = loadPubkey();
 
   // Sum BOTH known pools (our own + canonical) for total liquidity.
+  const { poolPda, canonicalPumpPoolPda } = await pumpSwap();
   const [own, canonical] = await Promise.all([
     readPoolReserves(conn, mint, poolPda(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk)),
     readPoolReserves(conn, mint, canonicalPumpPoolPda(mintPk, usdcPk)),
@@ -262,6 +271,7 @@ async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial
 async function fetchBondingCurveStats(conn: Connection, mint: string): Promise<Partial<DexStats>> {
   try {
     const mintPk = new PublicKey(mint);
+    const { PumpSdk, bondingCurvePda } = await pump();
     const sdk = new PumpSdk();
     const bcInfo = await conn.getAccountInfo(bondingCurvePda(mintPk));
     if (!bcInfo) return {};
@@ -302,6 +312,7 @@ async function fetchBondingCurveStats(conn: Connection, mint: string): Promise<P
 }
 
 async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
+  const { lpMintPda, poolPda } = await pumpSwap();
   const lpMint = lpMintPda(
     poolPda(OWN_POOL_INDEX, new PublicKey(wallet), new PublicKey(mint), new PublicKey(USDC_MINT)),
   ).toBase58();
