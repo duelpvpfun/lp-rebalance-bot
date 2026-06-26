@@ -13,6 +13,7 @@ import { Route as LaunchRouteImport } from './routes/launch'
 import { Route as CoinsRouteImport } from './routes/coins'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CoinMintRouteImport } from './routes/coin.$mint'
+import { Route as ApiPublicWorkerPingRouteImport } from './routes/api/public/worker-ping'
 import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
 import { Route as ApiPublicLaunchUploadRouteImport } from './routes/api/public/launch.upload'
@@ -39,6 +40,11 @@ const IndexRoute = IndexRouteImport.update({
 const CoinMintRoute = CoinMintRouteImport.update({
   id: '/coin/$mint',
   path: '/coin/$mint',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicWorkerPingRoute = ApiPublicWorkerPingRouteImport.update({
+  id: '/api/public/worker-ping',
+  path: '/api/public/worker-ping',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicTickRoute = ApiPublicTickRouteImport.update({
@@ -86,6 +92,7 @@ export interface FileRoutesByFullPath {
   '/coin/$mint': typeof CoinMintRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/worker-ping': typeof ApiPublicWorkerPingRoute
   '/api/public/launch/broadcast': typeof ApiPublicLaunchBroadcastRoute
   '/api/public/launch/funding-tx': typeof ApiPublicLaunchFundingTxRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
@@ -99,6 +106,7 @@ export interface FileRoutesByTo {
   '/coin/$mint': typeof CoinMintRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/worker-ping': typeof ApiPublicWorkerPingRoute
   '/api/public/launch/broadcast': typeof ApiPublicLaunchBroadcastRoute
   '/api/public/launch/funding-tx': typeof ApiPublicLaunchFundingTxRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
@@ -113,6 +121,7 @@ export interface FileRoutesById {
   '/coin/$mint': typeof CoinMintRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/worker-ping': typeof ApiPublicWorkerPingRoute
   '/api/public/launch/broadcast': typeof ApiPublicLaunchBroadcastRoute
   '/api/public/launch/funding-tx': typeof ApiPublicLaunchFundingTxRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
@@ -128,6 +137,7 @@ export interface FileRouteTypes {
     | '/coin/$mint'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/worker-ping'
     | '/api/public/launch/broadcast'
     | '/api/public/launch/funding-tx'
     | '/api/public/launch/prepare'
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
     | '/coin/$mint'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/worker-ping'
     | '/api/public/launch/broadcast'
     | '/api/public/launch/funding-tx'
     | '/api/public/launch/prepare'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '/coin/$mint'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/worker-ping'
     | '/api/public/launch/broadcast'
     | '/api/public/launch/funding-tx'
     | '/api/public/launch/prepare'
@@ -168,6 +180,7 @@ export interface RootRouteChildren {
   CoinMintRoute: typeof CoinMintRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
+  ApiPublicWorkerPingRoute: typeof ApiPublicWorkerPingRoute
   ApiPublicLaunchBroadcastRoute: typeof ApiPublicLaunchBroadcastRoute
   ApiPublicLaunchFundingTxRoute: typeof ApiPublicLaunchFundingTxRoute
   ApiPublicLaunchPrepareRoute: typeof ApiPublicLaunchPrepareRoute
@@ -203,6 +216,13 @@ declare module '@tanstack/react-router' {
       path: '/coin/$mint'
       fullPath: '/coin/$mint'
       preLoaderRoute: typeof CoinMintRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/worker-ping': {
+      id: '/api/public/worker-ping'
+      path: '/api/public/worker-ping'
+      fullPath: '/api/public/worker-ping'
+      preLoaderRoute: typeof ApiPublicWorkerPingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/tick': {
@@ -264,6 +284,7 @@ const rootRouteChildren: RootRouteChildren = {
   CoinMintRoute: CoinMintRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
+  ApiPublicWorkerPingRoute: ApiPublicWorkerPingRoute,
   ApiPublicLaunchBroadcastRoute: ApiPublicLaunchBroadcastRoute,
   ApiPublicLaunchFundingTxRoute: ApiPublicLaunchFundingTxRoute,
   ApiPublicLaunchPrepareRoute: ApiPublicLaunchPrepareRoute,
