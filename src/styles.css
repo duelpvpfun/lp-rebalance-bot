@@ -75,3 +75,30 @@
 }
 .lp-glow { animation: lp-glow 2.4s ease-in-out infinite; }
 
+/* Launchpad — pump.fun terminal feel in Liquititty blue/gold */
+.pf-link { color: var(--color-foreground); }
+.pf-link::before { content: "["; color: oklch(0.92 0.03 250 / 0.6); }
+.pf-link::after  { content: "]"; color: oklch(0.92 0.03 250 / 0.6); }
+.pf-link:hover { color: var(--color-accent); }
+
+.pf-chip { background: oklch(0.42 0.22 260 / 0.55); color: var(--color-foreground); border: 1px solid var(--color-border); padding: 4px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
+.pf-chip-gold { background: var(--color-accent); color: var(--color-accent-foreground); border: none; font-weight: 700; }
+.pf-chip-blue { background: oklch(0.7 0.18 250 / 0.9); color: oklch(0.2 0.1 260); border: none; font-weight: 700; }
+
+.pf-card { background: transparent; border: 1px solid transparent; transition: border-color .15s ease, background-color .15s ease; }
+.pf-card:hover { border-color: var(--color-border); background: oklch(0.42 0.22 260 / 0.35); }
+
+@keyframes pf-shine { 0% { transform: translateX(-120%); } 60% { transform: translateX(120%); } 100% { transform: translateX(120%); } }
+.pf-shine { position: relative; overflow: hidden; isolation: isolate; }
+.pf-shine::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%); transform: translateX(-120%); animation: pf-shine 3.6s ease-in-out infinite; pointer-events: none; mix-blend-mode: overlay; }
+
+@keyframes pf-king-aura {
+  0%, 100% { box-shadow: 0 0 0 1px oklch(0.85 0.18 95 / 0.35), 0 0 22px 2px oklch(0.85 0.18 95 / 0.22), 0 0 50px 8px oklch(0.85 0.18 95 / 0.12); }
+  50% { box-shadow: 0 0 0 1px oklch(0.9 0.2 95 / 0.6), 0 0 36px 6px oklch(0.85 0.2 95 / 0.36), 0 0 80px 14px oklch(0.85 0.2 95 / 0.22); }
+}
+.pf-king-aura { animation: pf-king-aura 3.2s ease-in-out infinite; border-radius: 14px; background: radial-gradient(120% 100% at 50% 0%, oklch(0.7 0.15 95 / 0.18), transparent 60%), oklch(0.42 0.22 260 / 0.4); border: 1px solid oklch(0.85 0.18 95 / 0.5); padding: 10px; }
+
+@keyframes pf-wiggle { 0%, 85%, 100% { transform: rotate(0deg); } 88% { transform: rotate(-10deg); } 91% { transform: rotate(8deg); } 94% { transform: rotate(-6deg); } 97% { transform: rotate(3deg); } }
+.pf-wiggle { animation: pf-wiggle 2.6s ease-in-out infinite; transform-origin: 50% 50%; }
+
+

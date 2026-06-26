@@ -42,101 +42,125 @@ function LaunchPage() {
   const [howOpen, setHowOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<"hot" | "new" | "mcap">("hot");
+  const [sort, setSort] = useState<"bump" | "new" | "mcap">("bump");
+
+  // Demo king card so the layout matches the airlaunch terminal even before
+  // the first real launch lands. Clicking it opens the create dialog.
+  const openCreate = () => setCreateOpen(true);
 
   return (
-    <div className="min-h-screen">
-      {/* HEADER */}
-      <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-6 py-6">
-        <Link to="/" className="flex items-center gap-3">
-          <img src={logo} alt="Liquititty" className="h-10 w-10 rounded-lg shadow-lg" />
-          <span className="font-display text-xl">LIQUITITTY</span>
-        </Link>
-        <nav className="hidden gap-6 text-sm md:flex">
-          <Link to="/" className="opacity-80 hover:opacity-100">Home</Link>
-          <button type="button" onClick={() => setHowOpen(true)} className="opacity-80 hover:opacity-100">
-            How it works
-          </button>
-          <a href="/#activity" className="opacity-80 hover:opacity-100">Live activity</a>
-        </nav>
-        <div className="flex items-center gap-2">
-          <a
-            href={COMMUNITY_URL}
-            target="_blank"
-            rel="noreferrer"
-            title="Join the community"
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 py-2 text-xs font-semibold transition hover:bg-secondary"
-          >
-            <Users className="h-3.5 w-3.5" /> Community
-          </a>
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="lp-glow inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-foreground shadow-[0_0_20px_-4px_var(--color-accent)] transition hover:scale-105"
-          >
-            <Rocket className="h-4 w-4" />
-            Launch a coin
-          </button>
+    <div className="flex min-h-screen flex-col">
+      {/* HEADER — matches airlaunch terminal header, our blue/gold palette */}
+      <header className="border-b border-border/60">
+        <div className="relative mx-auto flex max-w-[1400px] items-center justify-between gap-3 px-3 py-3 text-sm sm:px-4 sm:gap-4">
+          <div className="flex items-center gap-4">
+            <Link to="/" className="shrink-0">
+              <img src={logo} alt="liquititty" className="pf-wiggle h-8 w-8 rounded-md" />
+            </Link>
+            <nav className="hidden flex-wrap items-center gap-x-3 gap-y-1 md:flex">
+              <Link to="/" className="pf-link">home</Link>
+              <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="pf-link">community</a>
+              <a href="/#activity" className="pf-link">live activity</a>
+              <button type="button" onClick={() => setHowOpen(true)} className="pf-link cursor-pointer">how it works</button>
+            </nav>
+          </div>
+          <div className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2 select-none font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70 md:block">
+            v0.0.1
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <a
+              href={COMMUNITY_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="pf-shine inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent"
+            >
+              <Users className="h-3 w-3" /> community
+            </a>
+            <button
+              type="button"
+              onClick={openCreate}
+              className="lp-glow inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground transition hover:scale-[1.03]"
+            >
+              <Rocket className="h-3.5 w-3.5" />
+              launch a coin
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl px-6 pb-20">
-        {/* HERO */}
-        <section className="pt-6">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-secondary/30 px-4 py-1.5 text-xs uppercase tracking-widest backdrop-blur">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-            Launchpad · USDC pair · Auto-LP every 3 min
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 pb-16">
+        {/* start a new coin */}
+        <div className="pt-10 text-center">
+          <button type="button" onClick={openCreate} className="text-xl font-bold pf-link">
+            start a new coin
+          </button>
+        </div>
+
+        {/* KING OF THE HILL */}
+        <section className="mt-6 flex flex-col items-center">
+          <div
+            className="pf-shine mb-2 inline-block rounded-md px-3 py-1 text-xs font-black uppercase italic tracking-wide"
+            style={{
+              background: "linear-gradient(180deg, oklch(0.92 0.18 95), oklch(0.78 0.18 85))",
+              color: "oklch(0.28 0.12 260)",
+              textShadow: "0 1px 0 rgba(255,255,255,0.35)",
+              border: "2px solid oklch(0.55 0.2 95)",
+            }}
+          >
+            👑 king of the hill
           </div>
-          <h1 className="font-display text-4xl leading-[1.05] md:text-6xl">
-            LAUNCH A COIN.<br />
-            <span className="text-accent">IT REFILLS ITS OWN LP.</span>
-          </h1>
-          <p className="mt-5 max-w-2xl text-base text-muted-foreground md:text-lg">
-            Every coin launched here runs the Liquititty loop: claim creator fees in USDC,
-            keep 10% for the treasury, swap some to SOL for gas, buy back ~35% into your
-            token, redeposit into PumpSwap, then burn the LP tokens. You ship a coin. The
-            bot ships liquidity. Forever.
-          </p>
-          <div className="mt-7 flex flex-wrap gap-3">
+          <div className="pf-king-aura">
             <button
               type="button"
-              onClick={() => setCreateOpen(true)}
-              className="lp-glow inline-flex items-center gap-2 rounded-full bg-accent px-7 py-3 font-bold text-accent-foreground shadow-[0_0_32px_-4px_var(--color-accent)] transition hover:scale-105"
+              onClick={openCreate}
+              className="pf-card group flex items-start gap-3 rounded-md p-2.5 text-left"
             >
-              <Rocket className="h-5 w-5" />
-              Launch a coin
-            </button>
-            <button
-              type="button"
-              onClick={() => setHowOpen(true)}
-              className="rounded-full border border-border px-6 py-3 font-semibold backdrop-blur transition hover:bg-secondary/40"
-            >
-              How it works
+              <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
+                <img src={logo} alt="" className="h-full w-full object-cover" />
+              </div>
+              <div className="text-xs leading-relaxed">
+                <div className="mb-1 inline-block rounded-sm bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">
+                  example · launch yours
+                </div>
+                <div className="text-muted-foreground">
+                  Created by <span className="font-semibold text-accent">YOU</span>
+                </div>
+                <div className="text-muted-foreground">
+                  auto-LP cycle: <span className="font-bold text-foreground">every 3 min</span>
+                </div>
+                <div className="text-muted-foreground">
+                  burns LP: <span className="font-bold text-accent">forever</span> 🔒
+                </div>
+                <div className="mt-1 text-sm font-bold text-foreground group-hover:text-accent">
+                  Your Coin Here{" "}
+                  <span className="font-normal text-muted-foreground">(ticker: $TICKER)</span>
+                </div>
+              </div>
             </button>
           </div>
         </section>
 
         {/* SEARCH */}
-        <div className="mx-auto mt-14 flex max-w-2xl items-center gap-2">
+        <div className="mx-auto mt-10 flex max-w-2xl items-center gap-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-60" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="search for token"
-              className="w-full rounded-full border border-border bg-secondary/30 py-2.5 pl-9 pr-4 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-accent"
+              className="w-full rounded-md border border-border bg-input/60 py-2.5 pl-9 pr-4 text-sm outline-none focus:border-accent"
             />
           </div>
-          <button type="button" className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-accent-foreground">
+          <button type="button" className="rounded-md bg-accent px-5 py-2.5 text-sm font-bold text-accent-foreground">
             search
           </button>
         </div>
 
-        {/* TERMINAL */}
-        <div className="mt-12 flex flex-wrap items-center gap-3 border-b border-border/60 pb-3 text-sm">
-          <span className="font-display text-lg text-accent">TERMINAL</span>
-          <span className="opacity-50">·</span>
-          <SortPill label="hot" active={sort === "hot"} onClick={() => setSort("hot")} />
+        {/* FILTERS */}
+        <div className="mt-10 flex flex-wrap items-center gap-3 border-b border-border/60 pb-3 text-sm">
+          <span className="font-bold text-accent">Terminal</span>
+          <span className="text-muted-foreground">·</span>
+          <SortPill label="bump order" active={sort === "bump"} onClick={() => setSort("bump")} />
           <SortPill label="newest" active={sort === "new"} onClick={() => setSort("new")} />
           <SortPill label="market cap" active={sort === "mcap"} onClick={() => setSort("mcap")} />
           <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
@@ -148,29 +172,36 @@ function LaunchPage() {
           </span>
         </div>
 
-        {/* EMPTY STATE (real data only — no mocks until backend is wired) */}
-        <div className="mt-10 grid place-items-center rounded-2xl border-2 border-dashed border-border/70 bg-secondary/20 p-12 text-center">
-          <Sparkles className="h-6 w-6 text-accent" />
+        {/* EMPTY STATE (no mocks until backend wired) */}
+        <div className="mt-6 border border-dashed border-border bg-card/30 p-12 text-center text-sm">
+          <Sparkles className="mx-auto h-6 w-6 text-accent" />
           <p className="mt-3 font-display text-xl">no launches yet</p>
-          <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            The launchpad is live but no coins have been deployed yet. Be the first — every
-            coin you launch here will auto-refill its own LP every 3 minutes.
+          <p className="mt-2 text-muted-foreground">
+            be the first — every coin launched here auto-refills its own LP every 3 minutes.
           </p>
           <button
             type="button"
-            onClick={() => setCreateOpen(true)}
-            className="mt-5 inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-bold text-accent-foreground transition hover:scale-105"
+            onClick={openCreate}
+            className="mt-4 inline-block pf-link font-bold"
           >
-            <Rocket className="h-4 w-4" /> launch the first coin
+            launch the first coin
           </button>
         </div>
       </main>
 
-      <footer className="border-t border-border/60">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-3 px-6 py-6 text-xs text-muted-foreground sm:flex-row sm:justify-between">
+      <footer className="mt-auto border-t border-border/60">
+        <div className="mx-auto flex max-w-[1400px] flex-col items-center gap-3 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:justify-between">
           <div>liquititty.fun · built on solana · auto-LP on pumpswap</div>
-          <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-foreground">
-            <Users className="h-3.5 w-3.5" /> join the community
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">v0.0.1</div>
+          <a
+            href={COMMUNITY_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="community"
+            title="community"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-3 text-muted-foreground transition hover:border-accent/60 hover:text-accent"
+          >
+            <Users className="h-3.5 w-3.5" /> community
           </a>
         </div>
       </footer>
@@ -186,9 +217,9 @@ function SortPill({ label, active, onClick }: { label: string; active: boolean; 
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+      className={`rounded-md px-3 py-1 text-xs ${
         active
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent/20 text-accent"
           : "border border-border text-muted-foreground hover:text-foreground"
       }`}
     >
@@ -196,6 +227,7 @@ function SortPill({ label, active, onClick }: { label: string; active: boolean; 
     </button>
   );
 }
+
 
 /* ============================================================
    HOW IT WORKS — modal
