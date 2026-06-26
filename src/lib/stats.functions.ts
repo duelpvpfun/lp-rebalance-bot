@@ -1,8 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import { OnlinePumpAmmSdk, canonicalPumpPoolPda } from "@pump-fun/pump-swap-sdk";
+import { OnlinePumpAmmSdk, canonicalPumpPoolPda, poolPda } from "@pump-fun/pump-swap-sdk";
 import { PumpSdk, bondingCurvePda } from "@pump-fun/pump-sdk";
+
+const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
 
 function rpcUrl(): string {
   const helius = process.env.HELIUS_API_KEY;
@@ -155,14 +157,13 @@ const TOKEN_SUPPLY_FALLBACK = 1_000_000_000;
  * DexScreener, which can take many minutes to index a fresh pump.fun pair
  * (that lag is why the stats boxes were showing "—").
  */
-async function fetchOnchainPool(
+async function readPoolReserves(
   conn: Connection,
   mint: string,
-): Promise<Partial<DexStats>> {
+  poolPk: PublicKey,
+): Promise<Partial<DexStats> | null> {
   try {
     const mintPk = new PublicKey(mint);
-    const usdcPk = new PublicKey(USDC_MINT);
-    const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
     const sdk = new OnlinePumpAmmSdk(conn);
     const pool = await sdk.fetchPool(poolPk);
 
@@ -176,7 +177,7 @@ async function fetchOnchainPool(
     const liquidityToken = baseBal?.value.uiAmount ?? null;
     const liquidityUsdc = quoteBal?.value.uiAmount ?? null;
     if (liquidityToken == null || liquidityUsdc == null || liquidityToken <= 0) {
-      return {};
+      return null;
     }
 
     const priceUsd = liquidityUsdc / liquidityToken;
@@ -184,17 +185,31 @@ async function fetchOnchainPool(
     const supply = tokenSupply?.value.uiAmount ?? TOKEN_SUPPLY_FALLBACK;
     const marketCapUsd = priceUsd * supply;
 
-    return {
-      priceUsd,
-      marketCapUsd,
-      liquidityUsd,
-      liquidityToken,
-      liquidityUsdc,
-    };
+    return { priceUsd, marketCapUsd, liquidityUsd, liquidityToken, liquidityUsdc };
   } catch {
-    // No AMM pool yet — fall back to the bonding curve (pre-graduation).
-    return fetchBondingCurveStats(conn, mint);
+    return null;
   }
+}
+
+async function fetchOnchainPool(
+  conn: Connection,
+  mint: string,
+): Promise<Partial<DexStats>> {
+  const mintPk = new PublicKey(mint);
+  const usdcPk = new PublicKey(USDC_MINT);
+  const devWallet = loadPubkey();
+
+  // 1) Our own bot-created pool (works pre- and post-bond).
+  const ownPool = poolPda(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk);
+  const own = await readPoolReserves(conn, mint, ownPool);
+  if (own) return own;
+
+  // 2) The canonical PumpSwap pool (exists once graduated).
+  const canonical = await readPoolReserves(conn, mint, canonicalPumpPoolPda(mintPk, usdcPk));
+  if (canonical) return canonical;
+
+  // 3) Pre-graduation: read the bonding curve so the boxes still populate.
+  return fetchBondingCurveStats(conn, mint);
 }
 
 /**

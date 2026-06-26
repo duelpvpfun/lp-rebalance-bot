@@ -15,6 +15,7 @@ import {
   canonicalPumpPoolPda,
   coinCreatorVaultAtaPda,
   coinCreatorVaultAuthorityPda,
+  poolPda,
 } from "@pump-fun/pump-swap-sdk";
 import {
   PumpSdk,
@@ -47,6 +48,14 @@ const SLIPPAGE_BPS = 1500;
 const POOL_SLIPPAGE_PCT = 10;
 const MAX_LP_RETRIES = 6;
 const LP_SHRINK_FACTOR = 0.85;
+
+// Index for the bot-owned PumpSwap pool (the one we create + seed ourselves,
+// distinct from pump.fun's canonical pool created at graduation). Override via
+// env if you ever need a fresh pool. We add liquidity here both pre- and
+// post-bond so the LP grows every cycle regardless of graduation status.
+const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
+// Minimum USDC to bother creating/seeding a brand-new pool on the first run.
+const MIN_SEED_USDC = 1;
 
 export const CYCLE_INTERVAL_SEC = 60; // TEMP: set to 60 for testing, restore to 300 (5 min) later
 
@@ -82,7 +91,10 @@ async function getTokenUiBalance(conn: Connection, owner: string, mint: string):
   return total;
 }
 
-async function getTokenAccountUiBalance(conn: Connection, tokenAccount: PublicKey): Promise<number> {
+async function getTokenAccountUiBalance(
+  conn: Connection,
+  tokenAccount: PublicKey,
+): Promise<number> {
   try {
     const balance = await conn.getTokenAccountBalance(tokenAccount);
     return balance.value.uiAmount ?? 0;
@@ -104,9 +116,16 @@ async function sendInstructions(
   }).compileToV0Message();
   const tx = new VersionedTransaction(msg);
   tx.sign([signer]);
-  const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+  const sig = await conn.sendRawTransaction(tx.serialize(), {
+    skipPreflight: false,
+    maxRetries: 3,
+  });
   await conn.confirmTransaction(
-    { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
+    {
+      signature: sig,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    },
     "confirmed",
   );
   return sig;
@@ -119,14 +138,183 @@ async function getTokenDecimals(conn: Connection, mint: string): Promise<number>
 }
 
 /**
- * Pre-graduation cycle. There is no LP pool yet, so we:
- *   1) claim USDC creator fees from the bonding-curve creator vault (V2 — the
- *      quote-mint-aware claim PumpPortal does NOT build for USDC coins), then
- *   2) spend 100% of the claimed USDC buying the token on the bonding curve.
+ * Add liquidity to our OWN PumpSwap pool (index = OWN_POOL_INDEX, creator =
+ * the dev wallet). This works whether or not the token has graduated, because
+ * a PumpSwap AMM pool is independent of the pump.fun bonding curve — you can
+ * create and seed one at any time.
  *
- * Buying on the curve pushes USDC into its reserves and raises the market cap,
- * driving the token toward graduation. Once it graduates, runCycle() switches
- * to the AMM flow (claim -> 35% buy -> add LP) on its own.
+ * - First run: the pool doesn't exist yet, so we CREATE it and seed it with the
+ *   token + USDC we hold, at the given spot price.
+ * - Subsequent runs: the pool exists, so we DEPOSIT (token + matching USDC),
+ *   shrinking the token side if USDC is the limiting factor.
+ *
+ * `spotPriceUsdcPerToken` is the price we use to balance the two sides for the
+ * very first seed (so the new pool opens near the real market price).
+ */
+async function addToOwnPool(
+  conn: Connection,
+  signer: Keypair,
+  mint: string,
+  tokenDecimals: number,
+  spotPriceUsdcPerToken: number,
+  steps: StepResult[],
+): Promise<boolean> {
+  const mintPk = new PublicKey(mint);
+  const usdcPk = new PublicKey(USDC_MINT);
+  const userPk = signer.publicKey;
+  const usdcDecimals = 6;
+
+  const tokenAvail = await getTokenUiBalance(conn, signer.publicKey.toBase58(), mint);
+  const usdcAvail = await getTokenUiBalance(conn, signer.publicKey.toBase58(), USDC_MINT);
+  if (tokenAvail <= 0) {
+    steps.push({ step: "addLiquidity", ok: false, error: "no token balance to LP" });
+    return false;
+  }
+  if (usdcAvail <= 0) {
+    steps.push({ step: "addLiquidity", ok: false, error: "no USDC balance to LP" });
+    return false;
+  }
+
+  const onlineSdk = new OnlinePumpAmmSdk(conn);
+  const offlineSdk = new PumpAmmSdk();
+  const poolPk = poolPda(OWN_POOL_INDEX, userPk, mintPk, usdcPk);
+  const poolInfo = await conn.getAccountInfo(poolPk);
+
+  // ---- First run: create + seed the pool ----
+  if (!poolInfo) {
+    if (usdcAvail < MIN_SEED_USDC) {
+      steps.push({
+        step: "createPool",
+        ok: true,
+        info: `waiting: need >= ${MIN_SEED_USDC} USDC to seed a new pool, have ${usdcAvail.toFixed(4)}`,
+      });
+      return false;
+    }
+    try {
+      // Balance both sides at the spot price so the pool opens at market.
+      let seedTokenUi = tokenAvail;
+      let seedUsdcUi = seedTokenUi * spotPriceUsdcPerToken;
+      if (seedUsdcUi > usdcAvail) {
+        seedUsdcUi = usdcAvail;
+        seedTokenUi = spotPriceUsdcPerToken > 0 ? seedUsdcUi / spotPriceUsdcPerToken : tokenAvail;
+      }
+      const baseIn = new BN(BigInt(Math.floor(seedTokenUi * 10 ** tokenDecimals)).toString());
+      const quoteIn = new BN(BigInt(Math.floor(seedUsdcUi * 10 ** usdcDecimals)).toString());
+
+      const createState = await onlineSdk.createPoolSolanaState(
+        OWN_POOL_INDEX,
+        userPk,
+        mintPk,
+        usdcPk,
+      );
+      const createIxs = await offlineSdk.createPoolInstructions(createState, baseIn, quoteIn);
+      const ixs: TransactionInstruction[] = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
+        ComputeBudgetProgram.setComputeUnitPrice({
+          microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 600_000),
+        }),
+        ...createIxs,
+      ];
+      const sig = await sendInstructions(conn, signer, ixs);
+      steps.push({
+        step: "createPool",
+        ok: true,
+        signature: sig,
+        info: {
+          pool: poolPk.toBase58(),
+          seededToken: seedTokenUi,
+          seededUsdc: seedUsdcUi,
+          index: OWN_POOL_INDEX,
+        },
+      });
+      return true;
+    } catch (e) {
+      steps.push({ step: "createPool", ok: false, error: (e as Error).message });
+      return false;
+    }
+  }
+
+  // ---- Pool exists: deposit (token + matching USDC) with retry-on-shrink ----
+  try {
+    const liqState = await onlineSdk.liquiditySolanaState(poolPk, userPk);
+    if (!liqState.pool.baseMint.equals(mintPk)) {
+      throw new Error(
+        `pool base mint mismatch: pool.base=${liqState.pool.baseMint.toBase58()} expected=${mint}`,
+      );
+    }
+
+    let depositTokenUi = tokenAvail;
+    let lastErr = "";
+    for (let attempt = 0; attempt < MAX_LP_RETRIES; attempt++) {
+      try {
+        const baseRaw = new BN(BigInt(Math.floor(depositTokenUi * 10 ** tokenDecimals)).toString());
+        const auto = offlineSdk.depositAutocompleteQuoteAndLpTokenFromBase(
+          liqState,
+          baseRaw,
+          POOL_SLIPPAGE_PCT,
+        );
+        const usdcNeededUi = Number(auto.quote.toString()) / 10 ** usdcDecimals;
+
+        if (usdcNeededUi > usdcAvail) {
+          const ratio = (usdcAvail * 0.98) / usdcNeededUi;
+          depositTokenUi *= ratio;
+          throw new Error(
+            `insufficient USDC: need ${usdcNeededUi.toFixed(4)} have ${usdcAvail.toFixed(4)} -> shrink token to ${depositTokenUi}`,
+          );
+        }
+
+        const lpIxs = await offlineSdk.depositInstructions(
+          liqState,
+          auto.lpToken,
+          POOL_SLIPPAGE_PCT,
+        );
+        const ixs: TransactionInstruction[] = [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
+          ComputeBudgetProgram.setComputeUnitPrice({
+            microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 600_000),
+          }),
+          ...lpIxs,
+        ];
+        const sig = await sendInstructions(conn, signer, ixs);
+        steps.push({
+          step: "addLiquidity",
+          ok: true,
+          signature: sig,
+          info: {
+            tokenDeposited: depositTokenUi,
+            usdcDeposited: usdcNeededUi,
+            attempt: attempt + 1,
+          },
+        });
+        return true;
+      } catch (e) {
+        lastErr = (e as Error).message;
+        if (!lastErr.includes("insufficient USDC")) depositTokenUi *= LP_SHRINK_FACTOR;
+        steps.push({
+          step: `addLiquidity_retry_${attempt + 1}`,
+          ok: false,
+          error: lastErr,
+          info: { nextTokenAmount: depositTokenUi },
+        });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+    throw new Error(`LP failed after ${MAX_LP_RETRIES} retries: ${lastErr}`);
+  } catch (e) {
+    steps.push({ step: "addLiquidity", ok: false, error: (e as Error).message });
+    return false;
+  }
+}
+
+/**
+ * Pre-graduation cycle:
+ *   1) claim USDC creator fees from the bonding-curve creator vault (V2 — the
+ *      quote-mint-aware claim PumpPortal does NOT build for USDC coins),
+ *   2) buy 35% of the claimed USDC worth of token on the bonding curve, then
+ *   3) add the bought token + the remaining USDC into our own PumpSwap pool
+ *      (created on first run). The bonding curve has no LP, but a standalone
+ *      PumpSwap pool can be created/seeded at any time — so liquidity grows
+ *      every cycle even before graduation.
  */
 async function runBondingCurveCycle(
   conn: Connection,
@@ -185,7 +373,11 @@ async function runBondingCurveCycle(
     });
 
     if (claimableUsdc < 0.000001) {
-      steps.push({ step: "skip", ok: true, info: "no USDC creator rewards in bonding-curve vault" });
+      steps.push({
+        step: "skip",
+        ok: true,
+        info: "no USDC creator rewards in bonding-curve vault",
+      });
       return { ok: true, steps };
     }
 
@@ -219,15 +411,21 @@ async function runBondingCurveCycle(
     return { ok: true, steps };
   }
 
-  // STEP 2: buy the token on the bonding curve with 100% of the claimed USDC.
-  // (Pre-graduation there is no LP to add into, so the whole claim goes to the
-  // buy — that's what pushes the curve toward graduation.)
-  const spendUsdcRaw = new BN(Math.floor(claimedUsdc * 1e6).toString());
+  // STEP 2: buy 35% of the claimed USDC worth of token on the bonding curve.
+  // (The other 65% stays as USDC to pair into the LP in STEP 3.)
+  const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
+  const spendUsdcRaw = new BN(Math.floor(buybackUsdcUi * 1e6).toString());
+  let spotPriceUsdcPerToken = 0;
   try {
     const global = await onlinePumpSdk.fetchGlobal();
     const feeConfig = await onlinePumpSdk.fetchFeeConfig().catch(() => null);
     const buyState = await onlinePumpSdk.fetchBuyState(mintPk, user, TOKEN_PROGRAM_ID);
     const mintSupply = bondingCurve.tokenTotalSupply ?? null;
+
+    // Spot price for seeding our own pool (USDC per token, from virtual reserves).
+    const vToken = Number(bondingCurve.virtualTokenReserves.toString()) / 10 ** tokenDecimals;
+    const vUsdc = Number(bondingCurve.virtualQuoteReserves.toString()) / 1e6;
+    spotPriceUsdcPerToken = vToken > 0 ? vUsdc / vToken : 0;
 
     // Estimate how many tokens `spendUsdcRaw` USDC buys at the current curve.
     const expectedTokens = getBuyTokenAmountFromSolAmount({
@@ -266,16 +464,21 @@ async function runBondingCurveCycle(
       ok: true,
       signature: sig,
       info: {
-        spentUsdc: claimedUsdc,
+        spentUsdc: buybackUsdcUi,
         estTokens: Number(expectedTokens.toString()) / 10 ** tokenDecimals,
         venue: "bonding_curve",
       },
     });
-    return { ok: true, steps };
   } catch (e) {
     steps.push({ step: "swap", ok: false, error: (e as Error).message });
     return { ok: false, steps };
   }
+
+  await new Promise((r) => setTimeout(r, 4000));
+
+  // STEP 3: add the bought token + remaining USDC into our own PumpSwap pool.
+  await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, steps);
+  return { ok: steps.every((s) => s.ok || s.step.startsWith("addLiquidity_retry")), steps };
 }
 
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
@@ -460,115 +663,41 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
 
   await new Promise((r) => setTimeout(r, 4000));
 
-  // STEP 3: LP via PumpSwap SDK with retry-on-shrink
+  // STEP 3: add the bought token + remaining USDC into our own PumpSwap pool
+  // (created on first run, reused thereafter). Post-bond we use the live AMM
+  // price as the seed price; if the pool already exists the seed price is
+  // ignored and the deposit follows the pool's current ratio.
+  let spotPrice = 0;
   try {
-    const tokenAvail = await getTokenUiBalance(conn, pubkey, mint);
-    const usdcAvail = await getTokenUiBalance(conn, pubkey, USDC_MINT);
-    if (tokenAvail <= 0) throw new Error("no token balance to LP");
-    if (usdcAvail <= 0) throw new Error("no USDC balance to LP");
+    const dexPrice = await fetchAmmSpotPrice(conn, mint);
+    spotPrice = dexPrice;
+  } catch {
+    spotPrice = 0;
+  }
+  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPrice, steps);
+  return { ok, steps };
+}
 
+/**
+ * Best-effort spot price (USDC per token) from the canonical PumpSwap pool, used
+ * only to seed a brand-new bot-owned pool near market. Returns 0 if unavailable.
+ */
+async function fetchAmmSpotPrice(conn: Connection, mint: string): Promise<number> {
+  try {
     const mintPk = new PublicKey(mint);
     const usdcPk = new PublicKey(USDC_MINT);
-    const userPk = signer.publicKey;
-
-    // Resolve canonical PumpSwap pool for this USDC-quoted mint.
     const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
-    const onlineSdk = new OnlinePumpAmmSdk(conn);
-    const offlineSdk = new PumpAmmSdk();
-    const liqState = await onlineSdk.liquiditySolanaState(poolPk, userPk);
-
-    // Verify base/quote ordering. If mint is the quote (unlikely on pump.fun
-    // USDC pools but defensive), abort cleanly.
-    if (!liqState.pool.baseMint.equals(mintPk)) {
-      throw new Error(
-        `pool base mint mismatch: pool.base=${liqState.pool.baseMint.toBase58()} expected=${mint}`,
-      );
-    }
-    const usdcDecimals = 6;
-    let depositTokenUi = tokenAvail;
-
-    let lastErr = "";
-    for (let attempt = 0; attempt < MAX_LP_RETRIES; attempt++) {
-      try {
-        const baseRaw = new BN(
-          BigInt(Math.floor(depositTokenUi * 10 ** tokenDecimals)).toString(),
-        );
-        // Ask the SDK what USDC + LP tokens this base amount maps to right now.
-        const auto = offlineSdk.depositAutocompleteQuoteAndLpTokenFromBase(
-          liqState,
-          baseRaw,
-          POOL_SLIPPAGE_PCT,
-        );
-        const usdcNeededUi = Number(auto.quote.toString()) / 10 ** usdcDecimals;
-
-        // If we don't have enough USDC, shrink token side to fit (leave 2% buffer).
-        if (usdcNeededUi > usdcAvail) {
-          const ratio = (usdcAvail * 0.98) / usdcNeededUi;
-          depositTokenUi *= ratio;
-          throw new Error(
-            `insufficient USDC: need ${usdcNeededUi.toFixed(4)} have ${usdcAvail.toFixed(4)} -> shrink token to ${depositTokenUi}`,
-          );
-        }
-
-        const lpIxs: TransactionInstruction[] = await offlineSdk.depositInstructions(
-          liqState,
-          auto.lpToken,
-          POOL_SLIPPAGE_PCT,
-        );
-
-        const ixs: TransactionInstruction[] = [
-          ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
-          ComputeBudgetProgram.setComputeUnitPrice({
-            microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 600_000),
-          }),
-          ...lpIxs,
-        ];
-
-        const latest = await conn.getLatestBlockhash();
-        const msg = new TransactionMessage({
-          payerKey: userPk,
-          recentBlockhash: latest.blockhash,
-          instructions: ixs,
-        }).compileToV0Message();
-        const tx = new VersionedTransaction(msg);
-        tx.sign([signer]);
-        const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
-        await conn.confirmTransaction(
-          {
-            signature: sig,
-            blockhash: latest.blockhash,
-            lastValidBlockHeight: latest.lastValidBlockHeight,
-          },
-          "confirmed",
-        );
-        steps.push({
-          step: "addLiquidity",
-          ok: true,
-          signature: sig,
-          info: {
-            tokenDeposited: depositTokenUi,
-            usdcDeposited: usdcNeededUi,
-            attempt: attempt + 1,
-          },
-        });
-        return { ok: true, steps };
-      } catch (e) {
-        lastErr = (e as Error).message;
-        // Default shrink in case it wasn't a ratio issue.
-        if (!lastErr.includes("insufficient USDC")) depositTokenUi *= LP_SHRINK_FACTOR;
-        steps.push({
-          step: `addLiquidity_retry_${attempt + 1}`,
-          ok: false,
-          error: lastErr,
-          info: { nextTokenAmount: depositTokenUi },
-        });
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-    }
-    throw new Error(`LP failed after ${MAX_LP_RETRIES} retries: ${lastErr}`);
-  } catch (e) {
-    steps.push({ step: "addLiquidity", ok: false, error: (e as Error).message });
-    return { ok: false, steps };
+    const sdk = new OnlinePumpAmmSdk(conn);
+    const pool = await sdk.fetchPool(poolPk);
+    const [baseBal, quoteBal] = await Promise.all([
+      conn.getTokenAccountBalance(pool.poolBaseTokenAccount).catch(() => null),
+      conn.getTokenAccountBalance(pool.poolQuoteTokenAccount).catch(() => null),
+    ]);
+    const base = baseBal?.value.uiAmount ?? 0;
+    const quote = quoteBal?.value.uiAmount ?? 0;
+    return base > 0 ? quote / base : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -594,7 +723,9 @@ async function readLastCycleTsSec(): Promise<number | null> {
     const sigs = await conn.getSignaturesForAddress(signer.publicKey, { limit: 25 });
     const parsed = await Promise.all(
       sigs.map((s) =>
-        conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 }).catch(() => null),
+        conn
+          .getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 })
+          .catch(() => null),
       ),
     );
     for (let i = 0; i < sigs.length; i++) {
@@ -674,9 +805,7 @@ export function ensureScheduler(): void {
       .then((r) => {
         if (r.ran) {
           const okSteps = r.steps.filter((s) => s.ok).length;
-          console.log(
-            `[scheduler] cycle ran ok=${r.ok} steps=${okSteps}/${r.steps.length}`,
-          );
+          console.log(`[scheduler] cycle ran ok=${r.ok} steps=${okSteps}/${r.steps.length}`);
         }
       })
       .catch((e) => console.error("[scheduler] tick failed:", (e as Error).message));
