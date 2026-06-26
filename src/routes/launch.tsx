@@ -22,6 +22,7 @@ import { useLaunchWallet } from "@/components/WalletProvider";
 import {
   fetchFundingTx,
   slugify,
+  WORKER_BASE_PUBLIC,
   type PrepareResult,
   type LaunchStatus,
 } from "@/lib/launch-client";
@@ -286,9 +287,7 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
   const { data, isLoading, error } = useQuery({
     queryKey: ["launchpad-coins"],
     queryFn: async () => {
-      const r = await fetch(
-        "https://stunning-yodel-r74qvrvjq564cqp5-8787.app.github.dev/coins",
-      );
+      const r = await fetch(`${WORKER_BASE_PUBLIC}/coins`);
       if (!r.ok) throw new Error("failed");
       const j = await r.json();
       const arr: TerminalCoin[] = Array.isArray(j) ? j : j.coins ?? [];
