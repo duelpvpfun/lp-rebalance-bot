@@ -15,9 +15,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CoinMintRouteImport } from './routes/coin.$mint'
 import { Route as ApiPublicTickRouteImport } from './routes/api/public/tick'
 import { Route as ApiPublicRunCycleRouteImport } from './routes/api/public/run-cycle'
-import { Route as ApiPublicLaunchUploadRouteImport } from './routes/api/public/launch/upload'
-import { Route as ApiPublicLaunchStatusRouteImport } from './routes/api/public/launch/status'
-import { Route as ApiPublicLaunchPrepareRouteImport } from './routes/api/public/launch/prepare'
+import { Route as ApiPublicLaunchUploadRouteImport } from './routes/api/public/launch.upload'
+import { Route as ApiPublicLaunchStatusRouteImport } from './routes/api/public/launch.status'
+import { Route as ApiPublicLaunchPrepareRouteImport } from './routes/api/public/launch.prepare'
 
 const LaunchRoute = LaunchRouteImport.update({
   id: '/launch',
