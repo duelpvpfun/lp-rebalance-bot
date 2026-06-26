@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useEffect, useState } from "react";
-import { Users } from "lucide-react";
+import { Users, Rocket } from "lucide-react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
 
@@ -55,11 +55,18 @@ function Index() {
         <nav className="hidden gap-8 text-sm md:flex">
           <a href="#how" className="opacity-80 hover:opacity-100">How it works</a>
           <a href="#activity" className="opacity-80 hover:opacity-100">Live activity</a>
-          <a href="#tokenomics" className="opacity-80 hover:opacity-100">Tokenomics</a>
+          <Link to="/launch" className="opacity-80 hover:opacity-100">Launchpad</Link>
           <a href="#faq" className="opacity-80 hover:opacity-100">FAQ</a>
         </nav>
         <div className="flex items-center gap-2">
           <CommunityIcon />
+          <Link
+            to="/launch"
+            className="hidden items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-foreground shadow-[0_0_20px_-4px_var(--color-accent)] transition hover:scale-105 sm:inline-flex"
+          >
+            <Rocket className="h-4 w-4" />
+            Launch
+          </Link>
           <a
             id="buy"
             href={buyUrl}
@@ -100,6 +107,13 @@ function Index() {
             >
               Buy →
             </a>
+            <Link
+              to="/launch"
+              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-accent to-accent/70 px-6 py-3 font-bold text-accent-foreground shadow-[0_0_28px_-4px_var(--color-accent)] ring-2 ring-accent/40 transition hover:scale-105"
+            >
+              <Rocket className="h-4 w-4" />
+              Launch a coin
+            </Link>
             <a
               href={COMMUNITY_URL}
               target="_blank"
