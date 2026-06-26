@@ -114,11 +114,13 @@ function CoinPage() {
             <ConnectWalletButton />
             <Link
               to="/launch"
-              className="lp-glow inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground transition hover:scale-[1.03]"
+              className="lp-glow inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-accent px-3 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground transition hover:scale-[1.03] sm:px-4"
             >
               <Rocket className="h-3.5 w-3.5" />
-              launch a coin
+              <span className="hidden sm:inline">launch a coin</span>
+              <span className="sm:hidden">launch</span>
             </Link>
+
           </div>
         </div>
       </header>
