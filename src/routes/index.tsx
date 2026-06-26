@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { Suspense, useEffect, useState } from "react";
 import { Users } from "lucide-react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
@@ -13,9 +13,10 @@ const REAL_LAUNCH_CUTOFF = 1782446614;
 const statsQuery = queryOptions({
   queryKey: ["stats"],
   queryFn: () => getStats(),
-  refetchInterval: 6_000,
-  refetchIntervalInBackground: true,
-  staleTime: 3_000,
+  // Cron drives the cycle on our side; visitors just read cached stats.
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  staleTime: 15_000,
 });
 
 export const Route = createFileRoute("/")({
@@ -297,17 +298,6 @@ function useMounted() {
   return m;
 }
 
-type TickResponse = {
-  ran?: boolean;
-  ok?: boolean;
-  done?: boolean;
-  phase?: "claim" | "buy" | "lp" | "burn" | "idle";
-  nextPhase?: "claim" | "buy" | "lp" | "burn" | "idle";
-  reason?: "cooldown" | "in_flight";
-  secondsUntilNext?: number;
-  lastCycleAt?: number | null;
-};
-
 const PHASE_LABEL: Record<string, string> = {
   claim: "1/4 · Claiming USDC creator rewards",
   buy: "2/4 · Buying 35% back into $LIQUITITTY",
@@ -319,117 +309,32 @@ const CYCLE_INTERVAL_SEC = 60;
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
-  const queryClient = useQueryClient();
   const mounted = useMounted();
   const now = useNow(1000);
 
-  // Source of truth for the countdown: last on-chain dev-wallet tx + interval.
-  // Falls back to runtime cooldown row if no tx yet.
-  const [lastCycleAt, setLastCycleAt] = useState<number | null>(data.lastCycleAt);
-  const [targetMs, setTargetMs] = useState(() =>
-    data.cycleRuntime.cooldownUntil
-      ? data.cycleRuntime.cooldownUntil * 1000
-      : data.lastCycleAt
-        ? (data.lastCycleAt + CYCLE_INTERVAL_SEC) * 1000
-        : Date.now() + CYCLE_INTERVAL_SEC * 1000,
-  );
-  const [phase, setPhase] = useState<"claim" | "buy" | "lp" | "burn" | "idle">(
-    data.cycleRuntime.phase,
-  );
-  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(
-    data.cycleRuntime.cycleStartAt ? data.cycleRuntime.cycleStartAt * 1000 : null,
-  );
+  // Pure derivation from cached stats — no per-visitor /api/public/tick calls.
+  // pg_cron drives the actual cycle on the backend every minute.
+  const lastCycleAt = data.lastCycleAt;
+  const cooldownUntil = data.cycleRuntime.cooldownUntil;
+  const phase = data.cycleRuntime.phase;
+  const phaseStartedAt = data.cycleRuntime.cycleStartAt
+    ? data.cycleRuntime.cycleStartAt * 1000
+    : null;
 
-  useEffect(() => {
-    setLastCycleAt((prev) =>
-      data.lastCycleAt && (!prev || data.lastCycleAt > prev) ? data.lastCycleAt : prev,
-    );
-  }, [data.lastCycleAt]);
-
-  useEffect(() => {
-    if (data.cycleRuntime.cooldownUntil) {
-      setTargetMs(data.cycleRuntime.cooldownUntil * 1000);
-    }
-  }, [data.cycleRuntime.cooldownUntil]);
-
-  const postingRef = useRef(false);
-  const lastPostAtRef = useRef(0);
-
-  const applyTick = (r: TickResponse) => {
-    if (typeof r.secondsUntilNext === "number") {
-      setTargetMs(Date.now() + Math.max(0, r.secondsUntilNext) * 1000);
-    }
-    if (typeof r.lastCycleAt === "number") {
-      setLastCycleAt((prev) => (!prev || r.lastCycleAt! > prev ? r.lastCycleAt! : prev));
-    }
-    const nextPhase = (r.nextPhase ?? r.phase ?? "idle") as typeof phase;
-    setPhase((prev) => {
-      if (prev !== nextPhase) setPhaseStartedAt(nextPhase === "idle" ? null : Date.now());
-      return nextPhase;
-    });
-    if (r.ran || r.done) queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
-  };
-
-  // Never-die GET poll: status only, no side effect.
-  useEffect(() => {
-    if (!mounted) return;
-    let stopped = false;
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/public/tick");
-        const r = (await res.json()) as TickResponse;
-        if (!stopped) applyTick(r);
-      } catch {
-        /* keep state */
-      }
-    };
-    void poll();
-    const id = setInterval(() => void poll(), 3_000);
-    return () => {
-      stopped = true;
-      clearInterval(id);
-    };
-  }, [mounted, queryClient]);
+  const targetMs = cooldownUntil
+    ? cooldownUntil * 1000
+    : lastCycleAt
+      ? (lastCycleAt + CYCLE_INTERVAL_SEC) * 1000
+      : Date.now() + CYCLE_INTERVAL_SEC * 1000;
 
   const remaining = Math.max(0, Math.floor((targetMs - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
   const running = mounted && phase !== "idle";
-  const elapsed = mounted && phaseStartedAt ? Math.max(0, Math.floor((now - phaseStartedAt) / 1000)) : 0;
+  const elapsed =
+    mounted && phaseStartedAt ? Math.max(0, Math.floor((now - phaseStartedAt) / 1000)) : 0;
   const phaseLabel = running ? PHASE_LABEL[phase] ?? phase : null;
   const firing = mounted && !running && remaining === 0;
-
-  // Single-shot POST when countdown hits 0. Heavy throttle + ref guard prevents
-  // duplicate fires; backend has its own DB-level lock as the final guarantee.
-  useEffect(() => {
-    if (!mounted) return;
-    if (phase !== "idle") return; // never POST while a cycle is mid-flight
-    if (remaining > 0) return;
-    if (Date.now() - lastPostAtRef.current < 5_000) return;
-    if (postingRef.current) return;
-
-    let cancelled = false;
-    const advance = async () => {
-      postingRef.current = true;
-      lastPostAtRef.current = Date.now();
-      try {
-        const res = await fetch("/api/public/tick", {
-          method: "POST",
-          headers: { "x-liquititty-live-timer": "1" },
-        });
-        const r = (await res.json()) as TickResponse;
-        if (!cancelled) applyTick(r);
-      } catch {
-        /* keep countdown/status — next 3s poll will resync */
-      } finally {
-        postingRef.current = false;
-      }
-    };
-    void advance();
-    return () => {
-      cancelled = true;
-    };
-  }, [mounted, phase, remaining]);
 
   return (
     <div className="flex min-h-[132px] min-w-[280px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur">

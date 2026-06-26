@@ -362,32 +362,60 @@ async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
   }
 }
 
+// In-memory cache so every visitor doesn't trigger a fresh Helius/DexScreener/
+// Supabase fan-out. One real fetch per STATS_CACHE_TTL_MS per worker isolate;
+// concurrent callers share the in-flight promise. Keeps credits + RPC quota
+// flat regardless of traffic.
+const STATS_CACHE_TTL_MS = 15_000;
+let statsCache: { at: number; payload: StatsPayload } | null = null;
+let statsInflight: Promise<StatsPayload> | null = null;
+
+async function computeStats(): Promise<StatsPayload> {
+  const mint = process.env.TOKEN_MINT_ADDRESS;
+  if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
+  const devWallet = loadPubkey();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
+    fetchDex(mint),
+    fetchOnchainPool(conn, mint),
+    fetchTxs(conn, devWallet, mint),
+    fetchCycleRuntime(),
+  ]);
+
+  const dex: DexStats = {
+    priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
+    marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
+    liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
+    liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
+    liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
+    pairUrl: dexRaw.pairUrl,
+    dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
+  };
+
+  const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
+  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60, cycleRuntime };
+}
+
 export const getStats = createServerFn({ method: "GET" }).handler(
   async (): Promise<StatsPayload> => {
-    const mint = process.env.TOKEN_MINT_ADDRESS;
-    if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
-    const devWallet = loadPubkey();
-    const conn = new Connection(rpcUrl(), "confirmed");
-    const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
-      fetchDex(mint),
-      fetchOnchainPool(conn, mint),
-      fetchTxs(conn, devWallet, mint),
-      fetchCycleRuntime(),
-    ]);
-
-    // Prefer live on-chain pool reserves; fall back to DexScreener per-field so a
-    // value always shows as long as either source has it.
-    const dex: DexStats = {
-      priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
-      marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
-      liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
-      liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
-      liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
-      pairUrl: dexRaw.pairUrl,
-      dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
-    };
-
-    const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
-    return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60, cycleRuntime };
+    const now = Date.now();
+    if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS) {
+      return statsCache.payload;
+    }
+    if (statsInflight) return statsInflight;
+    statsInflight = (async () => {
+      try {
+        const payload = await computeStats();
+        statsCache = { at: Date.now(), payload };
+        return payload;
+      } catch (err) {
+        // Serve stale on error so visitors never see a blank page.
+        if (statsCache) return statsCache.payload;
+        throw err;
+      } finally {
+        statsInflight = null;
+      }
+    })();
+    return statsInflight;
   },
 );
