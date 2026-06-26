@@ -19,6 +19,7 @@ import { Route as ApiPublicLaunchUploadRouteImport } from './routes/api/public/l
 import { Route as ApiPublicLaunchStatusRouteImport } from './routes/api/public/launch.status'
 import { Route as ApiPublicLaunchPrepareRouteImport } from './routes/api/public/launch.prepare'
 import { Route as ApiPublicLaunchFundingTxRouteImport } from './routes/api/public/launch.funding-tx'
+import { Route as ApiPublicLaunchBroadcastRouteImport } from './routes/api/public/launch.broadcast'
 
 const LaunchRoute = LaunchRouteImport.update({
   id: '/launch',
@@ -71,6 +72,12 @@ const ApiPublicLaunchFundingTxRoute =
     path: '/api/public/launch/funding-tx',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicLaunchBroadcastRoute =
+  ApiPublicLaunchBroadcastRouteImport.update({
+    id: '/api/public/launch/broadcast',
+    path: '/api/public/launch/broadcast',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/coin/$mint': typeof CoinMintRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/launch/broadcast': typeof ApiPublicLaunchBroadcastRoute
   '/api/public/launch/funding-tx': typeof ApiPublicLaunchFundingTxRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
@@ -91,6 +99,7 @@ export interface FileRoutesByTo {
   '/coin/$mint': typeof CoinMintRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/launch/broadcast': typeof ApiPublicLaunchBroadcastRoute
   '/api/public/launch/funding-tx': typeof ApiPublicLaunchFundingTxRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
@@ -104,6 +113,7 @@ export interface FileRoutesById {
   '/coin/$mint': typeof CoinMintRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/launch/broadcast': typeof ApiPublicLaunchBroadcastRoute
   '/api/public/launch/funding-tx': typeof ApiPublicLaunchFundingTxRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/coin/$mint'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/launch/broadcast'
     | '/api/public/launch/funding-tx'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/coin/$mint'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/launch/broadcast'
     | '/api/public/launch/funding-tx'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
@@ -142,6 +154,7 @@ export interface FileRouteTypes {
     | '/coin/$mint'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/launch/broadcast'
     | '/api/public/launch/funding-tx'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
@@ -155,6 +168,7 @@ export interface RootRouteChildren {
   CoinMintRoute: typeof CoinMintRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
+  ApiPublicLaunchBroadcastRoute: typeof ApiPublicLaunchBroadcastRoute
   ApiPublicLaunchFundingTxRoute: typeof ApiPublicLaunchFundingTxRoute
   ApiPublicLaunchPrepareRoute: typeof ApiPublicLaunchPrepareRoute
   ApiPublicLaunchStatusRoute: typeof ApiPublicLaunchStatusRoute
@@ -233,6 +247,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicLaunchFundingTxRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/launch/broadcast': {
+      id: '/api/public/launch/broadcast'
+      path: '/api/public/launch/broadcast'
+      fullPath: '/api/public/launch/broadcast'
+      preLoaderRoute: typeof ApiPublicLaunchBroadcastRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -243,6 +264,7 @@ const rootRouteChildren: RootRouteChildren = {
   CoinMintRoute: CoinMintRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
+  ApiPublicLaunchBroadcastRoute: ApiPublicLaunchBroadcastRoute,
   ApiPublicLaunchFundingTxRoute: ApiPublicLaunchFundingTxRoute,
   ApiPublicLaunchPrepareRoute: ApiPublicLaunchPrepareRoute,
   ApiPublicLaunchStatusRoute: ApiPublicLaunchStatusRoute,
