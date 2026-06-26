@@ -62,18 +62,6 @@ export function loadKeypair(): Keypair {
   return Keypair.fromSecretKey(bs58.decode(pk.trim()));
 }
 
-async function signAndSend(conn: Connection, signer: Keypair, txBytes: ArrayBuffer): Promise<string> {
-  const tx = VersionedTransaction.deserialize(new Uint8Array(txBytes));
-  tx.sign([signer]);
-  const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
-  const latest = await conn.getLatestBlockhash();
-  await conn.confirmTransaction(
-    { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
-    "confirmed",
-  );
-  return sig;
-}
-
 async function getTokenUiBalance(conn: Connection, owner: string, mint: string): Promise<number> {
   const accounts = await conn.getParsedTokenAccountsByOwner(new PublicKey(owner), {
     mint: new PublicKey(mint),
