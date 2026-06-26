@@ -6,6 +6,9 @@ import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
 
 const COMMUNITY_URL = "https://x.com/i/communities/2033361508042780851";
+// Real CA launch cutoff (unix seconds). Any tx with blockTime before this is
+// from the test phase and gets a red TEST badge.
+const REAL_LAUNCH_CUTOFF = 1782446614;
 
 const statsQuery = queryOptions({
   queryKey: ["stats"],
