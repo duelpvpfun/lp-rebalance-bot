@@ -1,4 +1,5 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
 import type { Plugin } from "vite";
@@ -71,7 +72,14 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [solanaServerAliasPlugin()],
+    plugins: [
+      solanaServerAliasPlugin(),
+      nodePolyfills({
+        include: ["buffer", "process"],
+        globals: { Buffer: true, global: true, process: true },
+        protocolImports: true,
+      }),
+    ],
     define: {
       global: "globalThis",
     },
