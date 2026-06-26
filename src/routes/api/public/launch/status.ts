@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/api/launch/status")({
+export const Route = createFileRoute("/api/public/launch/status")({
   server: {
     handlers: {
       GET: async ({ request }) => {
