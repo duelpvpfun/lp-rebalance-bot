@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
+import { OnlinePumpAmmSdk, canonicalPumpPoolPda } from "@pump-fun/pump-swap-sdk";
 
 function rpcUrl(): string {
   const helius = process.env.HELIUS_API_KEY;
@@ -142,6 +143,55 @@ async function fetchDex(mint: string): Promise<DexStats> {
   }
 }
 
+const TOKEN_SUPPLY_FALLBACK = 1_000_000_000;
+
+/**
+ * Read liquidity straight from the canonical PumpSwap pool on-chain. This is
+ * the source of truth and works the instant the pool exists — unlike
+ * DexScreener, which can take many minutes to index a fresh pump.fun pair
+ * (that lag is why the stats boxes were showing "—").
+ */
+async function fetchOnchainPool(
+  conn: Connection,
+  mint: string,
+): Promise<Partial<DexStats>> {
+  try {
+    const mintPk = new PublicKey(mint);
+    const usdcPk = new PublicKey(USDC_MINT);
+    const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
+    const sdk = new OnlinePumpAmmSdk(conn);
+    const pool = await sdk.fetchPool(poolPk);
+
+    // Base = our token, Quote = USDC.
+    const [baseBal, quoteBal, tokenSupply] = await Promise.all([
+      conn.getTokenAccountBalance(pool.poolBaseTokenAccount).catch(() => null),
+      conn.getTokenAccountBalance(pool.poolQuoteTokenAccount).catch(() => null),
+      conn.getTokenSupply(mintPk).catch(() => null),
+    ]);
+
+    const liquidityToken = baseBal?.value.uiAmount ?? null;
+    const liquidityUsdc = quoteBal?.value.uiAmount ?? null;
+    if (liquidityToken == null || liquidityUsdc == null || liquidityToken <= 0) {
+      return {};
+    }
+
+    const priceUsd = liquidityUsdc / liquidityToken;
+    const liquidityUsd = liquidityUsdc * 2; // USDC side + equal-valued token side.
+    const supply = tokenSupply?.value.uiAmount ?? TOKEN_SUPPLY_FALLBACK;
+    const marketCapUsd = priceUsd * supply;
+
+    return {
+      priceUsd,
+      marketCapUsd,
+      liquidityUsd,
+      liquidityToken,
+      liquidityUsdc,
+    };
+  } catch {
+    return {};
+  }
+}
+
 async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
   const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 40 });
   const parsed = await Promise.all(
@@ -183,7 +233,24 @@ export const getStats = createServerFn({ method: "GET" }).handler(async (): Prom
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const devWallet = loadPubkey();
   const conn = new Connection(rpcUrl(), "confirmed");
-  const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet, mint)]);
+  const [dexRaw, onchain, txs] = await Promise.all([
+    fetchDex(mint),
+    fetchOnchainPool(conn, mint),
+    fetchTxs(conn, devWallet, mint),
+  ]);
+
+  // Prefer live on-chain pool reserves; fall back to DexScreener per-field so a
+  // value always shows as long as either source has it.
+  const dex: DexStats = {
+    priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
+    marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
+    liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
+    liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
+    liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
+    pairUrl: dexRaw.pairUrl,
+    dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
+  };
+
   const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
   return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60 };
 });

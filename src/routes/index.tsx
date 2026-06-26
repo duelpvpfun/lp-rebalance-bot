@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { Users } from "lucide-react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
 
@@ -221,13 +222,11 @@ function CommunityIcon() {
       href={COMMUNITY_URL}
       target="_blank"
       rel="noreferrer"
-      aria-label="Join the X community"
-      title="X community"
+      aria-label="Join the community"
+      title="Community"
       className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary/40 text-foreground transition hover:scale-110 hover:bg-secondary"
     >
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
-        <path d="M18.244 2H21.5l-7.59 8.67L23 22h-6.96l-5.45-6.61L4.32 22H1.06l8.12-9.28L1 2h7.08l4.93 6.01L18.244 2Zm-2.44 18h1.93L8.27 4H6.2l9.604 16Z" />
-      </svg>
+      <Users className="h-4 w-4" aria-hidden="true" />
     </a>
   );
 }

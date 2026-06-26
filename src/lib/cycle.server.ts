@@ -26,10 +26,12 @@ import {
  * Liquititty auto-cycle (USDC-quoted pump.fun coin).
  * Shared between the cron route (/api/public/run-cycle) and the
  * built-in scheduler route (/api/public/tick).
+ *
+ * The whole cycle runs against the canonical PumpSwap pool via the official
+ * SDK — claim, buyback and LP all use the same pool and the same USDC quote
+ * token, so there is no dependency on any third-party swap aggregator.
  */
 
-const JUPITER_QUOTE = "https://quote-api.jup.ag/v6/quote";
-const JUPITER_SWAP = "https://quote-api.jup.ag/v6/swap";
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const BUYBACK_PCT = 0.35;
@@ -109,16 +111,6 @@ async function getTokenDecimals(conn: Connection, mint: string): Promise<number>
   return info.value?.data?.parsed?.info?.decimals ?? 6;
 }
 
-async function priceTokenInUsdc(mint: string, tokenRaw: string): Promise<number> {
-  const url =
-    `${JUPITER_QUOTE}?inputMint=${mint}&outputMint=${USDC_MINT}` +
-    `&amount=${tokenRaw}&slippageBps=50&swapMode=ExactIn`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Jupiter price ${r.status}: ${await r.text()}`);
-  const j = await r.json();
-  return Number(j.outAmount);
-}
-
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
   const steps: StepResult[] = [];
   const mint = process.env.TOKEN_MINT_ADDRESS;
@@ -132,12 +124,31 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   // STEP 1: claim PumpSwap USDC creator fees directly with the official SDK.
   // PumpPortal's collectCreatorFee path was building/claiming the old WSOL vault,
   // which produced successful-looking txs but 0 USDC claimed for this USDC pair.
+  //
+  // The creator-fee vault is derived from the pool's on-chain `coinCreator`,
+  // NOT from whoever signs the tx. We read the canonical pool and use that
+  // value, so the claim always targets the right vault. If the dev wallet is
+  // not the registered creator, the claimed USDC would land in someone else's
+  // ATA — we detect that and fail loudly instead of silently claiming 0.
   const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   try {
     const offlineSdk = new PumpAmmSdk();
-    const coinCreator = signer.publicKey;
+    const onlineSdk = new OnlinePumpAmmSdk(conn);
     const quoteMint = new PublicKey(USDC_MINT);
     const quoteTokenProgram = TOKEN_PROGRAM_ID;
+
+    const poolPk = canonicalPumpPoolPda(new PublicKey(mint), quoteMint);
+    const pool = await onlineSdk.fetchPool(poolPk);
+    const coinCreator = pool.coinCreator;
+
+    if (!coinCreator.equals(signer.publicKey)) {
+      throw new Error(
+        `dev wallet ${pubkey} is not the pool coinCreator ${coinCreator.toBase58()} — ` +
+          `creator rewards are paid to the creator wallet, so this wallet cannot claim them. ` +
+          `Set DEV_WALLET_PRIVATE_KEY to the token's creator wallet.`,
+      );
+    }
+
     const coinCreatorVaultAuthority = coinCreatorVaultAuthorityPda(coinCreator);
     const coinCreatorVaultAta = coinCreatorVaultAtaPda(
       coinCreatorVaultAuthority,
@@ -212,38 +223,43 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
     return { ok: true, steps };
   }
 
-  // STEP 2: swap 35% USDC -> token
+  // STEP 2: buy back token with 35% of the claimed USDC, directly on the
+  // canonical PumpSwap pool (same pool we LP into). Using the PumpSwap SDK
+  // keeps the whole cycle on a single venue with no third-party aggregator.
   const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
   const buybackUsdcRaw = Math.floor(buybackUsdcUi * 1e6);
   try {
-    const quoteUrl =
-      `${JUPITER_QUOTE}?inputMint=${USDC_MINT}&outputMint=${mint}` +
-      `&amount=${buybackUsdcRaw}&slippageBps=${SLIPPAGE_BPS}`;
-    const quoteRes = await fetch(quoteUrl);
-    if (!quoteRes.ok) throw new Error(`Jupiter quote ${quoteRes.status}: ${await quoteRes.text()}`);
-    const quote = await quoteRes.json();
-    const swapRes = await fetch(JUPITER_SWAP, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        quoteResponse: quote,
-        userPublicKey: pubkey,
-        wrapAndUnwrapSol: true,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: Math.floor(PRIORITY_FEE_SOL * 1e9),
-      }),
-    });
-    if (!swapRes.ok) throw new Error(`Jupiter swap ${swapRes.status}: ${await swapRes.text()}`);
-    const { swapTransaction } = await swapRes.json();
-    const txBytes = Uint8Array.from(atob(swapTransaction), (c) => c.charCodeAt(0));
-    const tx = VersionedTransaction.deserialize(txBytes);
-    tx.sign([signer]);
-    const sig = await conn.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
-    const latest = await conn.getLatestBlockhash();
-    await conn.confirmTransaction(
-      { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
-      "confirmed",
+    const mintPk = new PublicKey(mint);
+    const usdcPk = new PublicKey(USDC_MINT);
+    const userPk = signer.publicKey;
+
+    const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
+    const onlineSdk = new OnlinePumpAmmSdk(conn);
+    const offlineSdk = new PumpAmmSdk();
+    const swapState = await onlineSdk.swapSolanaState(poolPk, userPk);
+
+    if (!swapState.pool.baseMint.equals(mintPk)) {
+      throw new Error(
+        `pool base mint mismatch: pool.base=${swapState.pool.baseMint.toBase58()} expected=${mint}`,
+      );
+    }
+
+    // quote (USDC) in -> base (token) out, with slippage tolerance.
+    const buyIxs: TransactionInstruction[] = await offlineSdk.buyQuoteInput(
+      swapState,
+      new BN(buybackUsdcRaw.toString()),
+      SLIPPAGE_BPS / 100,
     );
+
+    const ixs: TransactionInstruction[] = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 350_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 350_000),
+      }),
+      ...buyIxs,
+    ];
+
+    const sig = await sendInstructions(conn, signer, ixs);
     steps.push({ step: "swap", ok: true, signature: sig, info: { spentUsdc: buybackUsdcUi } });
   } catch (e) {
     steps.push({ step: "swap", ok: false, error: (e as Error).message });
@@ -444,4 +460,41 @@ export async function tick(): Promise<TickResult> {
   } finally {
     inFlight = null;
   }
+}
+
+/**
+ * Server-side scheduler. Starts a single setInterval (per server isolate) that
+ * fires `tick()` every CYCLE_INTERVAL_SEC. tick() is itself cooldown-gated by
+ * the on-chain timestamp + in-memory single-flight lock, so this is safe even
+ * if multiple isolates each start their own timer.
+ *
+ * This removes the dependency on a browser tab / external cron pinging the
+ * site — the cycle runs on its own as long as the server process is alive.
+ */
+let schedulerStarted = false;
+
+export function ensureScheduler(): void {
+  if (schedulerStarted) return;
+  schedulerStarted = true;
+
+  const fire = () => {
+    tick()
+      .then((r) => {
+        if (r.ran) {
+          const okSteps = r.steps.filter((s) => s.ok).length;
+          console.log(
+            `[scheduler] cycle ran ok=${r.ok} steps=${okSteps}/${r.steps.length}`,
+          );
+        }
+      })
+      .catch((e) => console.error("[scheduler] tick failed:", (e as Error).message));
+  };
+
+  // Kick once shortly after boot, then on a fixed interval.
+  setTimeout(fire, 3000);
+  const timer = setInterval(fire, CYCLE_INTERVAL_SEC * 1000);
+  // Don't keep the event loop alive solely for this timer.
+  (timer as { unref?: () => void }).unref?.();
+
+  console.log(`[scheduler] started — firing every ${CYCLE_INTERVAL_SEC}s`);
 }
