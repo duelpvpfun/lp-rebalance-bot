@@ -435,7 +435,7 @@ export async function computeStats(): Promise<StatsPayload> {
   const devWallet = loadPubkey();
   const conn = new Connection(rpcUrl(), "confirmed");
   const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
-    fetchDex(mint).catch(() => ({
+    withTimeout(fetchDex(mint), 9_000, "fetchDex").catch(() => ({
       priceUsd: null,
       marketCapUsd: null,
       liquidityUsd: null,
@@ -444,10 +444,11 @@ export async function computeStats(): Promise<StatsPayload> {
       pairUrl: null,
       dex: null,
     } satisfies DexStats)),
-    fetchOnchainPool(conn, mint).catch(() => ({} as Partial<DexStats>)),
-    fetchTxs(conn, devWallet, mint).catch(() => []),
-    fetchCycleRuntime().catch(() => ({ phase: "idle", cycleStartAt: null, cooldownUntil: null } as const)),
+    withTimeout(fetchOnchainPool(conn, mint), 10_000, "fetchOnchainPool").catch(() => ({} as Partial<DexStats>)),
+    withTimeout(fetchTxs(conn, devWallet, mint), 12_000, "fetchTxs").catch(() => []),
+    withTimeout(fetchCycleRuntime(), 5_000, "fetchCycleRuntime").catch(() => ({ phase: "idle", cycleStartAt: null, cooldownUntil: null } as const)),
   ]);
+
 
   const dex: DexStats = {
     priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
