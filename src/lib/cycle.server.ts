@@ -1,5 +1,19 @@
-import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  VersionedTransaction,
+  TransactionMessage,
+  ComputeBudgetProgram,
+  type TransactionInstruction,
+} from "@solana/web3.js";
 import bs58 from "bs58";
+import BN from "bn.js";
+import {
+  PumpAmmSdk,
+  OnlinePumpAmmSdk,
+  canonicalPumpPoolPda,
+} from "@pump-fun/pump-swap-sdk";
 
 /**
  * Liquititty auto-cycle (USDC-quoted pump.fun coin).
