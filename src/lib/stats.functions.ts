@@ -8,16 +8,80 @@ function rpcUrl(): string {
   return process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
 }
 
-// Only these on-chain actions are surfaced in the activity feed.
+// Programs we care about (used as hints, not the sole signal).
 const PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 const PUMP_FUN = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 const JUPITER_V4 = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
-function labelFor(programIds: string[]): "Claim Creator Rewards" | "Buy $LIQUIDITTY" | "Add Liquidity" | null {
-  if (programIds.includes(PUMP_AMM)) return "Add Liquidity";
-  if (programIds.includes(JUPITER_V6) || programIds.includes(JUPITER_V4)) return "Buy $LIQUIDITTY";
-  if (programIds.includes(PUMP_FUN)) return "Claim Creator Rewards";
+type ParsedTx = {
+  meta?: {
+    preTokenBalances?: Array<{
+      owner?: string;
+      mint?: string;
+      uiTokenAmount?: { uiAmount?: number | null };
+    }> | null;
+    postTokenBalances?: Array<{
+      owner?: string;
+      mint?: string;
+      uiTokenAmount?: { uiAmount?: number | null };
+    }> | null;
+    innerInstructions?: Array<{ instructions?: unknown[] }> | null;
+  } | null;
+  transaction?: { message?: { instructions?: unknown[] } };
+};
+
+function tokenDelta(tx: ParsedTx, owner: string, mint: string): number {
+  const pre = (tx.meta?.preTokenBalances ?? []).filter(
+    (b) => b.owner === owner && b.mint === mint,
+  );
+  const post = (tx.meta?.postTokenBalances ?? []).filter(
+    (b) => b.owner === owner && b.mint === mint,
+  );
+  const sum = (arr: typeof pre) =>
+    arr.reduce((s, b) => s + (b.uiTokenAmount?.uiAmount ?? 0), 0);
+  return sum(post) - sum(pre);
+}
+
+/**
+ * Classify what the dev wallet actually did by reading on-chain balance
+ * deltas — never guess from program IDs alone.
+ */
+function classify(
+  tx: ParsedTx,
+  programIds: Set<string>,
+  wallet: string,
+  mint: string,
+): string | null {
+  const tokenD = tokenDelta(tx, wallet, mint);
+  const usdcD = tokenDelta(tx, wallet, USDC_MINT);
+
+  // LP deposit/withdraw — PumpSwap program touched and BOTH sides moved out (or in for withdraw).
+  if (programIds.has(PUMP_AMM)) {
+    if (tokenD < 0 && usdcD < 0) return "Add Liquidity";
+    if (tokenD > 0 && usdcD > 0) return "Remove Liquidity";
+    // PumpSwap buy/sell via the AMM (no Jupiter)
+    if (tokenD > 0 && usdcD < 0) return "Buy $LIQUITITTY";
+    if (tokenD < 0 && usdcD > 0) return "Sell $LIQUITITTY";
+    return "PumpSwap Tx";
+  }
+
+  // Creator fee claim — pump.fun program + USDC inflow + no token movement.
+  if (programIds.has(PUMP_FUN) && tokenD === 0 && usdcD > 0) {
+    return "Claim Creator Rewards";
+  }
+
+  // Jupiter swap — direction depends on token delta.
+  if (programIds.has(JUPITER_V6) || programIds.has(JUPITER_V4)) {
+    if (tokenD > 0) return "Buy $LIQUITITTY";
+    if (tokenD < 0) return "Sell $LIQUITITTY";
+  }
+
+  // Last-resort: pure token transfer of the mint by the dev wallet.
+  if (tokenD < 0 && usdcD === 0) return "Send $LIQUITITTY";
+  if (tokenD > 0 && usdcD === 0) return "Receive $LIQUITITTY";
+
   return null;
 }
 
@@ -88,8 +152,7 @@ async function fetchDex(mint: string): Promise<DexStats> {
   }
 }
 
-async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
-  // Look back further so we can filter down to just claim / buy / LP.
+async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
   const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 40 });
   const parsed = await Promise.all(
     sigs.map((s) =>
@@ -99,10 +162,10 @@ async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
   const out: WalletTx[] = [];
   for (let i = 0; i < sigs.length; i++) {
     const s = sigs[i];
-    const tx = parsed[i];
+    const tx = parsed[i] as ParsedTx | null;
     if (!tx) continue;
     const pids = new Set<string>();
-    for (const ix of tx.transaction.message.instructions ?? []) {
+    for (const ix of tx.transaction?.message?.instructions ?? []) {
       const pid = (ix as { programId?: PublicKey }).programId?.toBase58();
       if (pid) pids.add(pid);
     }
@@ -112,7 +175,7 @@ async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
         if (pid) pids.add(pid);
       }
     }
-    const label = labelFor([...pids]);
+    const label = classify(tx, pids, wallet, mint);
     if (!label) continue;
     out.push({
       signature: s.signature,
@@ -130,7 +193,7 @@ export const getStats = createServerFn({ method: "GET" }).handler(async (): Prom
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const devWallet = loadPubkey();
   const conn = new Connection(rpcUrl(), "confirmed");
-  const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet)]);
+  const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet, mint)]);
   const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
   return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 300 };
 });
