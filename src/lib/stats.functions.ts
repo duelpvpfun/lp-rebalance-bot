@@ -307,6 +307,7 @@ async function fetchBondingCurveStats(conn: Connection, mint: string): Promise<P
 }
 
 async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
+  const { lpMintPda, poolPda } = await pumpSwap();
   const lpMint = lpMintPda(
     poolPda(OWN_POOL_INDEX, new PublicKey(wallet), new PublicKey(mint), new PublicKey(USDC_MINT)),
   ).toBase58();
