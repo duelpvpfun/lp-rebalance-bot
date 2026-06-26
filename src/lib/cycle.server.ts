@@ -926,9 +926,8 @@ export async function runCycleStep(state?: CycleState): Promise<{
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
         const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
-          // Pre-advance immediately AFTER claim broadcasts. If the host times
-          // out before confirmation returns, the next tick buys 35% of THIS
-          // claim instead of broadcasting another claim.
+          // Pre-advance BEFORE broadcasting claim. If the host dies after send,
+          // the next tick buys 35% of THIS claim instead of claiming again.
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
           await persistCycleProgress({
@@ -979,11 +978,10 @@ export async function runCycleStep(state?: CycleState): Promise<{
         break;
       }
       case "buy": {
-        const r = await stepBuy(conn, signer, mint, tokenDecimals, nextState.claimedUsdc, async () => {
-          // As soon as buy broadcasts, persist `lp`. If confirmation times out
-          // or the host dies, no future tick can double-buy the same claim.
-          await persistCycleProgress({ ...nextState, phase: "lp", attempts: 0 });
-        });
+        // Pre-advance BEFORE broadcasting the buy. This fully closes the
+        // serverless timeout window: no future tick can double-buy this claim.
+        await persistCycleProgress({ ...nextState, phase: "lp", attempts: 0 });
+        const r = await stepBuy(conn, signer, mint, tokenDecimals, nextState.claimedUsdc);
         steps = r.results;
         if (r.skip) {
           // can't buy → still try to LP whatever we hold next tick.
@@ -1021,11 +1019,10 @@ export async function runCycleStep(state?: CycleState): Promise<{
       }
 
       case "lp": {
-        const r = await stepLp(conn, signer, mint, tokenDecimals, nextState.spotPrice, async () => {
-          // Same protection for LP: once the deposit is broadcast, the next tick
-          // burns LP instead of depositing the same wallet balance twice.
-          await persistCycleProgress({ ...nextState, phase: "burn", attempts: 0 });
-        });
+        // Same protection for LP: pre-advance to burn so a timeout can never
+        // deposit the same wallet balance twice.
+        await persistCycleProgress({ ...nextState, phase: "burn", attempts: 0 });
+        const r = await stepLp(conn, signer, mint, tokenDecimals, nextState.spotPrice);
         steps = r.results;
         if (r.ok) {
           nextState.phase = "burn";
