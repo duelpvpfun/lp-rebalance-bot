@@ -30,6 +30,9 @@ type Coin = {
   liquidity_usd?: number;
   liquidity_usdc?: number;
   liquidity_token?: number;
+  claim_status?: "waiting_threshold" | "claiming" | null;
+  claimable_usdc?: number | null;
+  claim_checked_at?: string | null;
 };
 type Stats = {
   price_usd?: number | null;
