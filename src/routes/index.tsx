@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
-import { Suspense, useEffect, useState } from "react";
+import { useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { Suspense, useEffect, useRef, useState } from "react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
 
@@ -36,27 +36,7 @@ export const Route = createFileRoute("/")({
   notFoundComponent: () => <div className="p-10">Not found.</div>,
 });
 
-function useAutoTick() {
-  useEffect(() => {
-    let cancelled = false;
-    const fire = () => {
-      // Fire-and-forget. The endpoint no-ops during cooldown; we don't
-      // care about the response on the client.
-      fetch("/api/public/tick", { method: "POST" }).catch(() => {});
-    };
-    fire();
-    const id = setInterval(() => {
-      if (!cancelled) fire();
-    }, 10_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-}
-
 function Index() {
-  useAutoTick();
   return (
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -101,7 +81,7 @@ function Index() {
           <p className="mt-6 max-w-lg text-lg text-muted-foreground">
             $LIQUITITTY is a memecoin that pays its own bills. Every time the pool earns
             creator rewards, a robot grabs the cash and shoves it straight back into the
-            liquidity pool. You don't have to trust anyone — it just happens, every 5 minutes.
+            liquidity pool. You don't have to trust anyone — it just happens, every 1 minute.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
@@ -144,7 +124,7 @@ function Index() {
             A liquidity pool is just two buckets: one with $LIQUITITTY and one with USDC.
             People trade between them. Every trade pays a tiny fee, and pump.fun gives
             those fees to the coin's creator. Most coins, the creator pockets them.
-            $LIQUITITTY doesn't. A bot does this on a 5-minute loop:
+            $LIQUITITTY doesn't. A bot does this on a 1-minute loop:
           </p>
         </div>
 
@@ -153,7 +133,7 @@ function Index() {
             { n: "01", t: "Collect the rent", d: "The dev wallet auto-claims creator fees from pump.fun. These arrive as real USDC (dollars)." },
             { n: "02", t: "Buy some $LIQUITITTY", d: "35% of that USDC is used to market-buy $LIQUITITTY on PumpSwap. Yes, that nudges the price up — that's the point." },
             { n: "03", t: "Pair them up", d: "Now the wallet holds fresh $LIQUITITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match." },
-            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 5 minutes ago. Repeat forever." },
+            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 1 minute ago. Repeat forever." },
           ].map((s) => (
             <div key={s.n} className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-1 hover:bg-card">
               <div className="font-display text-3xl text-accent">{s.n}</div>
@@ -311,13 +291,42 @@ function useMounted() {
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
+  const queryClient = useQueryClient();
   const mounted = useMounted();
   const now = useNow(1000);
   const interval = data.cycleIntervalSec * 1000;
-  // If we know the last cycle, count down from there; otherwise show rolling 5min.
-  const base = data.lastCycleAt ? data.lastCycleAt * 1000 : now;
-  let nextAt = base + interval;
-  while (nextAt <= now) nextAt += interval;
+  const inFlightRef = useRef(false);
+  const [isFiring, setIsFiring] = useState(false);
+  const [nextAt, setNextAt] = useState(() => computeNextCycleAt(data.lastCycleAt, interval, Date.now()));
+
+  useEffect(() => {
+    if (!inFlightRef.current) {
+      setNextAt(computeNextCycleAt(data.lastCycleAt, interval, Date.now()));
+    }
+  }, [data.lastCycleAt, interval]);
+
+  useEffect(() => {
+    if (!mounted || now < nextAt || inFlightRef.current) return;
+    inFlightRef.current = true;
+    setIsFiring(true);
+    fetch("/api/public/tick", { method: "POST" })
+      .then((res) => res.json() as Promise<{ ran?: boolean; secondsUntilNext?: number }>)
+      .then((result) => {
+        const secondsUntilNext = typeof result.secondsUntilNext === "number"
+          ? result.secondsUntilNext
+          : data.cycleIntervalSec;
+        setNextAt(Date.now() + Math.max(1, secondsUntilNext) * 1000);
+        if (result.ran) {
+          queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
+        }
+      })
+      .catch(() => setNextAt(Date.now() + 5_000))
+      .finally(() => {
+        inFlightRef.current = false;
+        setIsFiring(false);
+      });
+  }, [data.cycleIntervalSec, mounted, nextAt, now, queryClient]);
+
   const remaining = Math.max(0, Math.floor((nextAt - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
@@ -325,10 +334,16 @@ function NextCycleTimer() {
     <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur">
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Next cycle in</div>
       <div className="font-display text-3xl tabular-nums text-accent" suppressHydrationWarning>
-        {mounted ? `${mm}:${ss}` : "--:--"}
+        {mounted ? (isFiring ? "FIRING" : `${mm}:${ss}`) : "--:--"}
       </div>
     </div>
   );
+}
+
+function computeNextCycleAt(lastCycleAtSec: number | null, intervalMs: number, nowMs: number) {
+  if (!lastCycleAtSec) return nowMs;
+  const nextAt = lastCycleAtSec * 1000 + intervalMs;
+  return nextAt <= nowMs ? nowMs : nextAt;
 }
 
 function TxList() {
