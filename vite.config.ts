@@ -10,7 +10,9 @@ import type { Plugin } from "vite";
 // gets v2.
 const V2_BROWSER_FALLBACK = [
   "codecs",
+  "codecs-core",
   "codecs-data-structures",
+  "codecs-numbers",
   "codecs-strings",
   "options",
 ];
