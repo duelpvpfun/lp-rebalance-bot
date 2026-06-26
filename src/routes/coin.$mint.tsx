@@ -166,11 +166,12 @@ function CoinPage() {
 
             {/* stats block — same vibe as the home stats header */}
             <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Stat label="Market cap" value={fmtUsd(coin.market_cap_usd)} />
-              <Stat label="Liquidity" value={fmtUsd(coin.liquidity_usd)} />
-              <Stat label="USDC in LP" value={fmtNum(coin.liquidity_usdc)} />
-              <Stat label={`$${coin.symbol ?? "TOKEN"} in LP`} value={fmtNum(coin.liquidity_token)} />
+              <Stat label="Market cap" value={fmtUsd(stats?.market_cap_usd)} />
+              <Stat label="Liquidity" value={fmtUsd(stats?.liquidity_usd)} />
+              <Stat label="USDC in LP" value={fmtNum(stats?.liquidity_usdc)} />
+              <Stat label={`$${coin.symbol ?? "TOKEN"} in LP`} value={fmtNum(stats?.liquidity_token)} />
             </div>
+
 
             {/* dexscreener chart */}
             <div className="mt-6 overflow-hidden rounded-md border border-border bg-card/30">
