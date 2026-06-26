@@ -397,7 +397,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (form.telegram) fd.append("telegram", form.telegram);
     if (form.website) fd.append("website", form.website);
 
-    const r = await fetch("/api/launch/upload", { method: "POST", body: fd });
+    const r = await fetch("/api/public/launch/upload", { method: "POST", body: fd });
     if (!r.ok) {
       const t = await r.text();
       throw new Error("Metadata upload failed: " + t);
@@ -429,7 +429,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       deployerWallet: publicKey.toBase58(),
       initialBuyUsdc: form.initialBuyUsdc,
     };
-    const r = await fetch("/api/launch/prepare", {
+    const r = await fetch("/api/public/launch/prepare", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -516,7 +516,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
     while (Date.now() < deadline) {
       try {
         const r = await fetch(
-          `/api/launch/status?id=${encodeURIComponent(pendingId)}`,
+          `/api/public/launch/status?id=${encodeURIComponent(pendingId)}`,
         );
         if (r.ok) {
           const j = (await r.json()) as LaunchStatus;
