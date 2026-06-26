@@ -926,9 +926,11 @@ async function stepBuy(
 ): Promise<{ results: StepResult[]; ok: boolean; skip: boolean }> {
   const out: StepResult[] = [];
   const walletUsdc = await getTokenUiBalance(conn, signer.publicKey.toBase58(), USDC_MINT);
-  // If earlier claim calls already landed before the state machine reached buy,
-  // include that USDC too. This prevents "many tiny claims -> one tiny buy".
-  const claimBasisUsdc = Math.max(claimedUsdc, walletUsdc);
+  // Buy basis is STRICTLY the USDC claimed this cycle — never the full wallet
+  // balance. Leftover USDC from earlier cycles or seed funding must not inflate
+  // the buy. If the wallet somehow has less than claimed (e.g. partial spend),
+  // cap to what's actually available.
+  const claimBasisUsdc = Math.min(claimedUsdc, walletUsdc);
   if (claimBasisUsdc < MIN_CLAIM_USDC || walletUsdc < MIN_CLAIM_USDC) {
     out.push({ step: "skip", ok: true, info: "claimed USDC too small to buy" });
     return { results: out, ok: false, skip: true };
