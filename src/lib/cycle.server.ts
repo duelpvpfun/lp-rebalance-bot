@@ -608,7 +608,7 @@ function freshInMemoryState(): CycleState {
 
 function mayHaveBroadcast(steps: StepResult[]): boolean {
   return steps.some(
-    (s) => typeof s.error === "string" && /tx\s+[1-9A-HJ-NP-Za-km-z]{32,}\s+did not confirm/i.test(s.error),
+    (s) => typeof s.error === "string" && /tx\s+[1-9A-HJ-NP-Za-km-z]{32,}\s+(did not confirm|broadcast)/i.test(s.error),
   );
 }
 
