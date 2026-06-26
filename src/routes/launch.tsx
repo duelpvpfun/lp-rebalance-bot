@@ -46,6 +46,13 @@ function LaunchPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"bump" | "new" | "mcap">("bump");
+  const { data: stats } = useQuery({
+    queryKey: ["stats"],
+    queryFn: () => getStats(),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
 
   // Demo king card so the layout matches the airlaunch terminal even before
   // the first real launch lands. Clicking it opens the create dialog.
