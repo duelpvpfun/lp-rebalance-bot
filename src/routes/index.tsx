@@ -364,7 +364,7 @@ function NextCycleTimer() {
   }, [mounted, running, remaining, qc]);
 
   return (
-    <div className="flex h-[132px] w-[300px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur">
+    <div className="flex h-[132px] w-full max-w-[340px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur sm:w-[300px]">
       <div className="flex h-4 items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
         {(running || firing) && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
         <span className="truncate">{running ? "Cycle running" : firing ? "Firing now…" : "Next cycle in"}</span>
