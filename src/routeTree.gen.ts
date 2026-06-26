@@ -19,6 +19,7 @@ import { Route as ApiPublicFooRouteImport } from './routes/api/public/foo'
 import { Route as ApiPublicLaunchUploadRouteImport } from './routes/api/public/launch.upload'
 import { Route as ApiPublicLaunchStatusRouteImport } from './routes/api/public/launch.status'
 import { Route as ApiPublicLaunchPrepareRouteImport } from './routes/api/public/launch.prepare'
+import { Route as ApiPublicLaunchFooRouteImport } from './routes/api/public/launch.foo'
 
 const LaunchRoute = LaunchRouteImport.update({
   id: '/launch',
@@ -70,6 +71,11 @@ const ApiPublicLaunchPrepareRoute = ApiPublicLaunchPrepareRouteImport.update({
   path: '/api/public/launch/prepare',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicLaunchFooRoute = ApiPublicLaunchFooRouteImport.update({
+  id: '/api/public/launch/foo',
+  path: '/api/public/launch/foo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/api/public/foo': typeof ApiPublicFooRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/launch/foo': typeof ApiPublicLaunchFooRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
   '/api/public/launch/upload': typeof ApiPublicLaunchUploadRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByTo {
   '/api/public/foo': typeof ApiPublicFooRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/launch/foo': typeof ApiPublicLaunchFooRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
   '/api/public/launch/upload': typeof ApiPublicLaunchUploadRoute
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   '/api/public/foo': typeof ApiPublicFooRoute
   '/api/public/run-cycle': typeof ApiPublicRunCycleRoute
   '/api/public/tick': typeof ApiPublicTickRoute
+  '/api/public/launch/foo': typeof ApiPublicLaunchFooRoute
   '/api/public/launch/prepare': typeof ApiPublicLaunchPrepareRoute
   '/api/public/launch/status': typeof ApiPublicLaunchStatusRoute
   '/api/public/launch/upload': typeof ApiPublicLaunchUploadRoute
@@ -118,6 +127,7 @@ export interface FileRouteTypes {
     | '/api/public/foo'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/launch/foo'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
     | '/api/public/launch/upload'
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
     | '/api/public/foo'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/launch/foo'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
     | '/api/public/launch/upload'
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
     | '/api/public/foo'
     | '/api/public/run-cycle'
     | '/api/public/tick'
+    | '/api/public/launch/foo'
     | '/api/public/launch/prepare'
     | '/api/public/launch/status'
     | '/api/public/launch/upload'
@@ -155,6 +167,7 @@ export interface RootRouteChildren {
   ApiPublicFooRoute: typeof ApiPublicFooRoute
   ApiPublicRunCycleRoute: typeof ApiPublicRunCycleRoute
   ApiPublicTickRoute: typeof ApiPublicTickRoute
+  ApiPublicLaunchFooRoute: typeof ApiPublicLaunchFooRoute
   ApiPublicLaunchPrepareRoute: typeof ApiPublicLaunchPrepareRoute
   ApiPublicLaunchStatusRoute: typeof ApiPublicLaunchStatusRoute
   ApiPublicLaunchUploadRoute: typeof ApiPublicLaunchUploadRoute
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicLaunchPrepareRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/launch/foo': {
+      id: '/api/public/launch/foo'
+      path: '/api/public/launch/foo'
+      fullPath: '/api/public/launch/foo'
+      preLoaderRoute: typeof ApiPublicLaunchFooRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -243,6 +263,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicFooRoute: ApiPublicFooRoute,
   ApiPublicRunCycleRoute: ApiPublicRunCycleRoute,
   ApiPublicTickRoute: ApiPublicTickRoute,
+  ApiPublicLaunchFooRoute: ApiPublicLaunchFooRoute,
   ApiPublicLaunchPrepareRoute: ApiPublicLaunchPrepareRoute,
   ApiPublicLaunchStatusRoute: ApiPublicLaunchStatusRoute,
   ApiPublicLaunchUploadRoute: ApiPublicLaunchUploadRoute,
@@ -250,3 +271,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
