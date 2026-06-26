@@ -148,11 +148,10 @@ function orderCycleTxs(txs: WalletTx[]): WalletTx[] {
     }
   }
 
+  // Flatten complete cycles and show newest transaction first, oldest last.
   return groups
-    .sort((a, b) => (b[0]?.blockTime ?? 0) - (a[0]?.blockTime ?? 0))
-    .flatMap((group) =>
-      [...group].sort((a, b) => CYCLE_LABEL_ORDER[a.label] - CYCLE_LABEL_ORDER[b.label]),
-    )
+    .flatMap((group) => group)
+    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
     .slice(0, 20);
 }
 

@@ -239,13 +239,16 @@ function CommunityIcon() {
 function StatsBar() {
   const { data } = useSuspenseQuery(statsQuery);
   const d = data.dex;
+  const mounted = useMounted();
+  // Render skeleton until client mount so live external numbers don't cause a hydration mismatch.
+  if (!mounted) return <StatsBarSkeleton />;
   return (
     <section className="mx-auto max-w-6xl px-6">
       <div className="grid gap-4 md:grid-cols-4">
         <LiveBlock label="Market Cap" value={fmtUsd(d.marketCapUsd)} />
         <LiveBlock label="Liquidity (USD)" value={fmtUsd(d.liquidityUsd)} />
-        <LiveBlock label="USDC in LP" value={fmtNum(d.liquidityUsdc, "USDC")} />
-        <LiveBlock label="$LIQUITITTY in LP" value={fmtNum(d.liquidityToken, "LIQUITITTY")} />
+        <LiveBlock label="USDC in LP" value={fmtNum(d.liquidityUsdc)} />
+        <LiveBlock label="$LIQUITITTY in LP" value={fmtNum(d.liquidityToken)} />
       </div>
       <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
         Live · refreshes every 30s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}
