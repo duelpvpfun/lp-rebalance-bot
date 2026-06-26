@@ -465,6 +465,7 @@ type CycleState = {
   claimedUsdc: number;
   spotPrice: number;
   attempts: number;
+  leaseOwner?: string;
 };
 
 function isPhase(value: unknown): value is Phase {
@@ -492,6 +493,7 @@ function rowToCycleState(raw: unknown): CycleState {
     claimedUsdc: Number(row.claimed_usdc ?? 0),
     spotPrice: Number(row.spot_price ?? 0),
     attempts: Number(row.attempts ?? 0),
+    leaseOwner: typeof row.lease_owner === "string" ? row.lease_owner : undefined,
   };
 }
 
@@ -1047,7 +1049,6 @@ async function runCycleStep(state?: CycleState): Promise<{
   done: boolean;
   steps: StepResult[];
   state: CycleState;
-  claimReserved?: boolean;
 }> {
   if (process.env.BOT_ENABLED !== "true") {
     return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
@@ -1093,7 +1094,6 @@ async function runCycleStep(state?: CycleState): Promise<{
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
         let claimProgressSaved = false;
-        let claimReserved = false;
 
         // Final safety gate immediately before the first transaction of a new
         // cycle. This uses the newest finalized dev-wallet signature of ANY
@@ -1114,14 +1114,13 @@ async function runCycleStep(state?: CycleState): Promise<{
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
           const reserved = await reserveClaimProgress(
-            (inputState as CycleState & { leaseOwner?: string }).leaseOwner ?? "",
+            inputState.leaseOwner ?? "",
             expectedClaimedUsdc,
             spotPriceUsdcPerToken,
           );
           if (!reserved) {
             throw new Error("claim already reserved by another runner — blocking duplicate claim tx");
           }
-          claimReserved = true;
           claimProgressSaved = true;
           const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
           nextState.cooldownUntilMs = claimGuardCooldown;
@@ -1465,17 +1464,6 @@ export async function tick(): Promise<TickResult> {
       secondsUntilNext: Math.ceil((reset.cooldownUntilMs - now) / 1000),
     };
   }
-  if (atStartOfCycle && now < leasedState.cooldownUntilMs) {
-    await persistCycleState(leasedState);
-    lastKnownPhase = "idle";
-    return {
-      ran: false,
-      reason: "cooldown",
-      phase: "idle",
-      secondsUntilNext: Math.ceil((leasedState.cooldownUntilMs - now) / 1000),
-    };
-  }
-
   lastKnownPhase = leasedState.phase;
   inFlight = runCycleStep(leasedState);
   try {
