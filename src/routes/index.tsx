@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
+
+const COMMUNITY_URL = "https://x.com/i/communities/2033361508042780851";
 
 const statsQuery = queryOptions({
   queryKey: ["stats"],
@@ -18,7 +20,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Every creator reward is auto-claimed in USDC, partly bought back into $TITTY, and dumped back into the PumpSwap LP. Liquidity only goes up.",
+          "Every creator reward is auto-claimed in USDC, partly bought back into $LIQUIDITTY, and dumped back into the PumpSwap LP. Liquidity only goes up.",
       },
       { property: "og:title", content: "Liquititty" },
       { property: "og:description", content: "Tits up. Liquidity up. Fully on-chain auto-LP." },
@@ -48,18 +50,20 @@ function Index() {
           <a href="#tokenomics" className="opacity-80 hover:opacity-100">Tokenomics</a>
           <a href="#faq" className="opacity-80 hover:opacity-100">FAQ</a>
         </nav>
-        <a
-          id="buy"
-          href="https://pump.fun"
-          target="_blank"
-          rel="noreferrer"
-          className="rounded-full bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-lg transition hover:scale-105"
-        >
-          Buy $TITTY
-        </a>
+        <div className="flex items-center gap-2">
+          <CommunityIcon />
+          <a
+            id="buy"
+            href="https://pump.fun"
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-lg transition hover:scale-105"
+          >
+            Buy
+          </a>
+        </div>
       </header>
 
-      {/* Live blocks */}
       <Suspense fallback={<StatsBarSkeleton />}>
         <StatsBar />
       </Suspense>
@@ -75,9 +79,9 @@ function Index() {
             <span className="text-accent">LIQUIDITY</span> UP.
           </h1>
           <p className="mt-6 max-w-lg text-lg text-muted-foreground">
-            Liquititty is a memecoin that pays its own bills. Every time the pool earns
+            $LIQUIDITTY is a memecoin that pays its own bills. Every time the pool earns
             creator rewards, a robot grabs the cash and shoves it straight back into the
-            liquidity pool. You don't have to trust anyone — it just happens.
+            liquidity pool. You don't have to trust anyone — it just happens, every 5 minutes.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
@@ -86,13 +90,21 @@ function Index() {
               rel="noreferrer"
               className="rounded-full bg-accent px-6 py-3 font-bold text-accent-foreground shadow-xl transition hover:scale-105"
             >
-              Ape on PumpSwap →
+              Buy →
+            </a>
+            <a
+              href={COMMUNITY_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-border px-6 py-3 font-semibold backdrop-blur transition hover:bg-secondary/40"
+            >
+              Join the community
             </a>
             <a
               href="#how"
               className="rounded-full border border-border px-6 py-3 font-semibold backdrop-blur transition hover:bg-secondary/40"
             >
-              How it works (slowly)
+              How it works
             </a>
           </div>
         </div>
@@ -104,46 +116,26 @@ function Index() {
         </div>
       </section>
 
-      {/* Normie explanation */}
       <section id="how" className="mx-auto max-w-6xl px-6 py-20">
         <div className="max-w-2xl">
           <p className="text-xs uppercase tracking-widest text-accent">Explain it like I'm 5</p>
           <h2 className="mt-2 text-4xl md:text-5xl">HOW LIQUIDITY GROWS BY ITSELF</h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            A liquidity pool is just two buckets: one with $TITTY and one with USDC.
+            A liquidity pool is just two buckets: one with $LIQUIDITTY and one with USDC.
             People trade between them. Every trade pays a tiny fee, and pump.fun gives
             those fees to the coin's creator. Most coins, the creator pockets them.
-            Liquititty doesn't. A bot does this on repeat:
+            $LIQUIDITTY doesn't. A bot does this on a 5-minute loop:
           </p>
         </div>
 
         <div className="mt-12 grid gap-6 md:grid-cols-4">
           {[
-            {
-              n: "01",
-              t: "Collect the rent",
-              d: "The dev wallet auto-claims creator fees from pump.fun. These arrive as real USDC (dollars).",
-            },
-            {
-              n: "02",
-              t: "Buy some $TITTY",
-              d: "35% of that USDC is used to market-buy $TITTY on PumpSwap. Yes, that nudges the price up — that's the point.",
-            },
-            {
-              n: "03",
-              t: "Pair them up",
-              d: "Now the wallet holds fresh $TITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match.",
-            },
-            {
-              n: "04",
-              t: "Refill the pool",
-              d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 30 minutes ago. Repeat forever.",
-            },
+            { n: "01", t: "Collect the rent", d: "The dev wallet auto-claims creator fees from pump.fun. These arrive as real USDC (dollars)." },
+            { n: "02", t: "Buy some $LIQUIDITTY", d: "35% of that USDC is used to market-buy $LIQUIDITTY on PumpSwap. Yes, that nudges the price up — that's the point." },
+            { n: "03", t: "Pair them up", d: "Now the wallet holds fresh $LIQUIDITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match." },
+            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 5 minutes ago. Repeat forever." },
           ].map((s) => (
-            <div
-              key={s.n}
-              className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-1 hover:bg-card"
-            >
+            <div key={s.n} className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-1 hover:bg-card">
               <div className="font-display text-3xl text-accent">{s.n}</div>
               <div className="mt-2 text-xl font-bold">{s.t}</div>
               <p className="mt-2 text-sm text-muted-foreground">{s.d}</p>
@@ -154,27 +146,30 @@ function Index() {
         <div className="mt-10 rounded-2xl border border-border bg-secondary/30 p-6 text-sm text-muted-foreground md:p-8">
           <p className="font-bold text-foreground">Why 35% and not 50/50?</p>
           <p className="mt-2">
-            When the bot buys $TITTY, the price moves a little. So if it spent half on tokens
-            and tried to LP the other half, the ratio would already be off and the deposit
-            would leave USDC behind. 35% is the sweet spot that gets us back to a balanced
-            deposit. If the price pumps hard between the buy and the LP, the bot caps the
-            token side to whatever the USDC can match and saves the leftover $TITTY for the
-            next round. <span className="text-foreground">Nothing ever leaves the wallet.</span>
+            When the bot buys $LIQUIDITTY, the price moves a little. So if it spent half
+            on tokens and tried to LP the other half, the ratio would already be off and
+            the deposit would leave USDC behind. 35% is the sweet spot to get a clean
+            deposit. If the price keeps pumping between the buy and the LP, the bot
+            shrinks the token side until the USDC matches and saves the leftover
+            $LIQUIDITTY for the next round.{" "}
+            <span className="text-foreground">Nothing ever leaves the wallet.</span>
           </p>
         </div>
       </section>
 
-      {/* Activity */}
       <section id="activity" className="mx-auto max-w-6xl px-6 py-20">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-widest text-accent">On-chain receipts</p>
             <h2 className="mt-2 text-4xl md:text-5xl">DEV WALLET ACTIVITY</h2>
             <p className="mt-3 max-w-2xl text-muted-foreground">
-              Every claim, every buy, every LP deposit. Live from Solana. Click any row to
-              verify it on Solscan yourself.
+              Only the three actions the bot is allowed to do: claim, buy, LP.
+              Click any row to verify it on Solscan yourself.
             </p>
           </div>
+          <Suspense fallback={null}>
+            <NextCycleTimer />
+          </Suspense>
         </div>
         <Suspense fallback={<TxListSkeleton />}>
           <TxList />
@@ -198,18 +193,10 @@ function Index() {
       <section id="faq" className="mx-auto max-w-3xl px-6 py-20">
         <h2 className="text-4xl md:text-5xl">FAQ</h2>
         <div className="mt-8 space-y-4">
-          <Faq
-            q="Wait, so the dev can't rug me?"
-            a="The dev wallet only ever does three things on a timer: claim creator fees, buy $TITTY, deposit into the LP. No transfers out. Watch it live in the activity section."
-          />
-          <Faq
-            q="Does the LP keep growing forever?"
-            a="As long as people trade $TITTY, yes. Trading pays fees → fees become liquidity → bigger LP = less slippage → more trading. It's a flywheel."
-          />
-          <Faq
-            q="What if the price moons between the buy and the deposit?"
-            a="The bot only deposits the amount of $TITTY that the available USDC can match at the current price. Leftover tokens stay in the wallet and get added on the next round."
-          />
+          <Faq q="Wait, so the dev can't rug me?" a="The dev wallet only ever does three things: claim creator fees, buy $LIQUIDITTY, deposit into the LP. No transfers out. Watch it live in the activity section." />
+          <Faq q="How often does it run?" a="Every 5 minutes. The countdown to the next cycle is right at the top of the activity section." />
+          <Faq q="Does the LP keep growing forever?" a="As long as people trade $LIQUIDITTY, yes. Trading pays fees → fees become liquidity → bigger LP = less slippage → more trading. Flywheel." />
+          <Faq q="What if the price moons between the buy and the deposit?" a="The bot retries the LP with a smaller token amount each pass until the USDC matches. Leftover tokens stay in the wallet and ship on the next cycle." />
           <Faq q="What chain?" a="Solana. PumpSwap pool. USDC pair." />
           <Faq q="Why the logo?" a="Two tits. Liquidity. It writes itself." />
         </div>
@@ -218,10 +205,30 @@ function Index() {
       <footer className="border-t border-border/50 py-10 text-center text-sm text-muted-foreground">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-3 px-6">
           <img src={logo} alt="" className="h-8 w-8 rounded" />
-          <div>© {new Date().getFullYear()} Liquititty. Not financial advice. Not even good advice.</div>
+          <div className="flex items-center gap-3">
+            <CommunityIcon />
+            <span>© {new Date().getFullYear()} $LIQUIDITTY. Not financial advice. Not even good advice.</span>
+          </div>
         </div>
       </footer>
     </div>
+  );
+}
+
+function CommunityIcon() {
+  return (
+    <a
+      href={COMMUNITY_URL}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Join the X community"
+      title="X community"
+      className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary/40 text-foreground transition hover:scale-110 hover:bg-secondary"
+    >
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+        <path d="M18.244 2H21.5l-7.59 8.67L23 22h-6.96l-5.45-6.61L4.32 22H1.06l8.12-9.28L1 2h7.08l4.93 6.01L18.244 2Zm-2.44 18h1.93L8.27 4H6.2l9.604 16Z" />
+      </svg>
+    </a>
   );
 }
 
@@ -234,17 +241,13 @@ function StatsBar() {
         <LiveBlock label="Market Cap" value={fmtUsd(d.marketCapUsd)} />
         <LiveBlock label="Liquidity (USD)" value={fmtUsd(d.liquidityUsd)} />
         <LiveBlock label="USDC in LP" value={fmtNum(d.liquidityUsdc, "USDC")} />
-        <LiveBlock label="$TITTY in LP" value={fmtNum(d.liquidityToken, "TITTY")} />
+        <LiveBlock label="$LIQUIDITTY in LP" value={fmtNum(d.liquidityToken, "LIQUIDITTY")} />
       </div>
       <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
         Live · refreshes every 30s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}
         {d.pairUrl ? (
-          <a className="underline" target="_blank" rel="noreferrer" href={d.pairUrl}>
-            chart
-          </a>
-        ) : (
-          "no pair yet"
-        )}
+          <a className="underline" target="_blank" rel="noreferrer" href={d.pairUrl}>chart</a>
+        ) : ("no pair yet")}
       </div>
     </section>
   );
@@ -267,6 +270,43 @@ function LiveBlock({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl border border-border bg-gradient-to-br from-card/80 to-card/40 p-5 backdrop-blur">
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
       <div className="mt-2 font-display text-2xl md:text-3xl">{value}</div>
+    </div>
+  );
+}
+
+function useNow(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function useMounted() {
+  const [m, setM] = useState(false);
+  useEffect(() => setM(true), []);
+  return m;
+}
+
+function NextCycleTimer() {
+  const { data } = useSuspenseQuery(statsQuery);
+  const mounted = useMounted();
+  const now = useNow(1000);
+  const interval = data.cycleIntervalSec * 1000;
+  // If we know the last cycle, count down from there; otherwise show rolling 5min.
+  const base = data.lastCycleAt ? data.lastCycleAt * 1000 : now;
+  let nextAt = base + interval;
+  while (nextAt <= now) nextAt += interval;
+  const remaining = Math.max(0, Math.floor((nextAt - now) / 1000));
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
+  return (
+    <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Next cycle in</div>
+      <div className="font-display text-3xl tabular-nums text-accent" suppressHydrationWarning>
+        {mounted ? `${mm}:${ss}` : "--:--"}
+      </div>
     </div>
   );
 }
@@ -295,14 +335,10 @@ function TxList() {
         {data.txs.map((t) => (
           <li key={t.signature} className="flex items-center justify-between gap-4 px-5 py-4">
             <div className="flex items-center gap-3">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  t.success ? "bg-accent" : "bg-destructive"
-                }`}
-              />
+              <span className={`inline-block h-2 w-2 rounded-full ${t.success ? "bg-accent" : "bg-destructive"}`} />
               <div>
                 <div className="font-bold">{t.label}</div>
-                <div className="text-xs text-muted-foreground">{formatTime(t.blockTime)}</div>
+                <RelativeTime t={t.blockTime} />
               </div>
             </div>
             <a
@@ -318,6 +354,24 @@ function TxList() {
       </ul>
     </div>
   );
+}
+
+function RelativeTime({ t }: { t: number | null }) {
+  const mounted = useMounted();
+  const now = useNow(15_000);
+  if (!t) return <div className="text-xs text-muted-foreground">pending</div>;
+  // Render an absolute timestamp during SSR / first paint to avoid hydration drift.
+  const absolute = new Date(t * 1000).toISOString().slice(11, 16) + " UTC";
+  if (!mounted) {
+    return <div className="text-xs text-muted-foreground" suppressHydrationWarning>{absolute}</div>;
+  }
+  const diff = now / 1000 - t;
+  let label: string;
+  if (diff < 60) label = `${Math.floor(diff)}s ago`;
+  else if (diff < 3600) label = `${Math.floor(diff / 60)}m ago`;
+  else if (diff < 86400) label = `${Math.floor(diff / 3600)}h ago`;
+  else label = new Date(t * 1000).toLocaleDateString();
+  return <div className="text-xs text-muted-foreground" suppressHydrationWarning>{label}</div>;
 }
 
 function TxListSkeleton() {
@@ -363,12 +417,3 @@ function fmtNum(n: number | null, suffix: string): string {
 function short(s: string): string {
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
-function formatTime(t: number | null): string {
-  if (!t) return "pending";
-  const diff = Date.now() / 1000 - t;
-  if (diff < 60) return `${Math.floor(diff)}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return new Date(t * 1000).toLocaleDateString();
-}
-

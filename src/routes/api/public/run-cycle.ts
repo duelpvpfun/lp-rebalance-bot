@@ -8,16 +8,20 @@ import bs58 from "bs58";
  * Steps:
  *  1. Claim creator rewards (USDC) via PumpPortal `collectCreatorFee`.
  *  2. Jupiter: swap BUYBACK_PCT of the newly claimed USDC into the token.
- *  3. Add LP on PumpSwap (TOKEN/USDC). Pair as much TOKEN + USDC as the
- *     current pool ratio allows, capped by the wallet's USDC balance.
- *     If the price moved up and we don't have enough USDC to pair 100% of
- *     bought tokens, we cap the token side to what the USDC can match and
- *     keep the leftover tokens for the next round.
+ *  3. Add LP on PumpSwap (TOKEN/USDC). Try to deposit 100% of the new tokens.
+ *     If the price pumped and we don't have enough USDC, retry with a
+ *     smaller token amount (shrinking each pass) until it lands or we hit
+ *     MAX_LP_RETRIES. Any leftover tokens stay in the wallet for next round.
  *
- * Auth: `Authorization: Bearer <CRON_SECRET>`.
+ * Auth: `Authorization: Bearer <CRON_SECRET>`. Run every 5 minutes.
  */
 
-const RPC_URL = process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+function rpcUrl(): string {
+  const helius = process.env.HELIUS_API_KEY;
+  if (helius) return `https://mainnet.helius-rpc.com/?api-key=${helius}`;
+  return process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+}
+
 const PUMPPORTAL_LOCAL = "https://pumpportal.fun/api/trade-local";
 const JUPITER_QUOTE = "https://quote-api.jup.ag/v6/quote";
 const JUPITER_SWAP = "https://quote-api.jup.ag/v6/swap";
@@ -25,19 +29,17 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const BUYBACK_PCT = 0.35;
 const PRIORITY_FEE_SOL = 0.0005;
-const SLIPPAGE_BPS = 1500; // 15%
+const SLIPPAGE_BPS = 1500;
 const POOL_SLIPPAGE_PCT = 10;
-// safety margin so we don't get rejected at the edge of the pool ratio
-const LP_SAFETY = 0.98;
+const MAX_LP_RETRIES = 6;
+const LP_SHRINK_FACTOR = 0.85; // shrink token side 15% per retry
 
 type StepResult = { step: string; ok: boolean; signature?: string; info?: unknown; error?: string };
 
 function loadKeypair(): Keypair {
   const pk = process.env.DEV_WALLET_PRIVATE_KEY;
   if (!pk) throw new Error("DEV_WALLET_PRIVATE_KEY missing");
-  if (pk.trim().startsWith("[")) {
-    return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(pk)));
-  }
+  if (pk.trim().startsWith("[")) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(pk)));
   return Keypair.fromSecretKey(bs58.decode(pk.trim()));
 }
 
@@ -74,21 +76,20 @@ async function getTokenUiBalance(conn: Connection, owner: string, mint: string):
   return total;
 }
 
-/** Use Jupiter as oracle: how much USDC does `tokenUi` of TOKEN price at? */
-async function priceTokenInUsdc(mint: string, tokenRawAmount: string): Promise<number> {
-  const url =
-    `${JUPITER_QUOTE}?inputMint=${mint}&outputMint=${USDC_MINT}` +
-    `&amount=${tokenRawAmount}&slippageBps=50&swapMode=ExactIn`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Jupiter price ${r.status}: ${await r.text()}`);
-  const j = await r.json();
-  return Number(j.outAmount); // raw USDC (6dp)
-}
-
 async function getTokenDecimals(conn: Connection, mint: string): Promise<number> {
   const info = await conn.getParsedAccountInfo(new PublicKey(mint));
   // @ts-expect-error parsed shape
   return info.value?.data?.parsed?.info?.decimals ?? 6;
+}
+
+async function priceTokenInUsdc(mint: string, tokenRaw: string): Promise<number> {
+  const url =
+    `${JUPITER_QUOTE}?inputMint=${mint}&outputMint=${USDC_MINT}` +
+    `&amount=${tokenRaw}&slippageBps=50&swapMode=ExactIn`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Jupiter price ${r.status}: ${await r.text()}`);
+  const j = await r.json();
+  return Number(j.outAmount);
 }
 
 async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
@@ -98,11 +99,10 @@ async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
 
   const signer = loadKeypair();
   const pubkey = signer.publicKey.toBase58();
-  const conn = new Connection(RPC_URL, "confirmed");
-
+  const conn = new Connection(rpcUrl(), "confirmed");
   const tokenDecimals = await getTokenDecimals(conn, mint);
 
-  // --- STEP 1: claim creator rewards (USDC) ---
+  // STEP 1: claim
   const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   try {
     const txBuf = await pumpPortalLocal({
@@ -127,7 +127,7 @@ async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
     return { ok: true, steps };
   }
 
-  // --- STEP 2: Jupiter swap USDC → token (BUYBACK_PCT of claimed) ---
+  // STEP 2: swap 35% USDC -> token
   const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
   const buybackUsdcRaw = Math.floor(buybackUsdcUi * 1e6);
   try {
@@ -137,7 +137,6 @@ async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
     const quoteRes = await fetch(quoteUrl);
     if (!quoteRes.ok) throw new Error(`Jupiter quote ${quoteRes.status}: ${await quoteRes.text()}`);
     const quote = await quoteRes.json();
-
     const swapRes = await fetch(JUPITER_SWAP, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -168,51 +167,61 @@ async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
 
   await new Promise((r) => setTimeout(r, 4000));
 
-  // --- STEP 3: add liquidity on PumpSwap (TOKEN/USDC) ---
+  // STEP 3: LP with retry-on-shrink
   try {
     const tokenAvail = await getTokenUiBalance(conn, pubkey, mint);
     const usdcAvail = await getTokenUiBalance(conn, pubkey, USDC_MINT);
     if (tokenAvail <= 0) throw new Error("no token balance to LP");
     if (usdcAvail <= 0) throw new Error("no USDC balance to LP");
 
-    // Price tokens via Jupiter to estimate the USDC needed at current pool ratio.
+    // Start estimate: cap token side to what USDC can pair at current price.
     const tokenRaw = BigInt(Math.floor(tokenAvail * 10 ** tokenDecimals)).toString();
     const usdcNeededRaw = await priceTokenInUsdc(mint, tokenRaw);
     const usdcNeededUi = usdcNeededRaw / 1e6;
 
     let depositTokenUi = tokenAvail;
-    let note: string | undefined;
     if (usdcNeededUi > usdcAvail) {
-      // Price pumped — cap tokens to what our USDC can match, leftover tokens
-      // stay in the wallet for the next cycle.
-      const ratio = (usdcAvail * LP_SAFETY) / usdcNeededUi;
-      depositTokenUi = tokenAvail * ratio;
-      note = `price pumped; LPing ${(ratio * 100).toFixed(2)}% of tokens, rest deferred`;
+      depositTokenUi = tokenAvail * ((usdcAvail * 0.98) / usdcNeededUi);
     }
 
-    const txBuf = await pumpPortalLocal({
-      publicKey: pubkey,
-      action: "depositLiquidity",
-      mint,
-      amount: depositTokenUi,
-      denominatedInSol: "false",
-      slippage: POOL_SLIPPAGE_PCT,
-      priorityFee: PRIORITY_FEE_SOL,
-      pool: "pump-amm",
-    });
-    const sig = await signAndSend(conn, signer, txBuf);
-    steps.push({
-      step: "addLiquidity",
-      ok: true,
-      signature: sig,
-      info: { tokenDeposited: depositTokenUi, usdcAvail, usdcNeededUi, note },
-    });
+    let lastErr = "";
+    for (let attempt = 0; attempt < MAX_LP_RETRIES; attempt++) {
+      try {
+        const txBuf = await pumpPortalLocal({
+          publicKey: pubkey,
+          action: "depositLiquidity",
+          mint,
+          amount: depositTokenUi,
+          denominatedInSol: "false",
+          slippage: POOL_SLIPPAGE_PCT,
+          priorityFee: PRIORITY_FEE_SOL,
+          pool: "pump-amm",
+        });
+        const sig = await signAndSend(conn, signer, txBuf);
+        steps.push({
+          step: "addLiquidity",
+          ok: true,
+          signature: sig,
+          info: { tokenDeposited: depositTokenUi, attempt: attempt + 1 },
+        });
+        return { ok: true, steps };
+      } catch (e) {
+        lastErr = (e as Error).message;
+        depositTokenUi *= LP_SHRINK_FACTOR;
+        steps.push({
+          step: `addLiquidity_retry_${attempt + 1}`,
+          ok: false,
+          error: lastErr,
+          info: { nextTokenAmount: depositTokenUi },
+        });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+    throw new Error(`LP failed after ${MAX_LP_RETRIES} retries: ${lastErr}`);
   } catch (e) {
     steps.push({ step: "addLiquidity", ok: false, error: (e as Error).message });
     return { ok: false, steps };
   }
-
-  return { ok: true, steps };
 }
 
 export const Route = createFileRoute("/api/public/run-cycle")({
