@@ -15,10 +15,10 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import logo from "@/assets/liquititty-logo.webp";
 import { getStats } from "@/lib/stats.functions";
 import { ConnectWalletButton } from "@/components/ConnectWalletButton";
+import { useLaunchWallet } from "@/components/WalletProvider";
 import {
   buildFundingTx,
   slugify,
@@ -373,8 +373,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const [statusInfo, setStatusInfo] = useState<LaunchStatus | null>(null);
   const update = (k: keyof Form, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
-  const { connection } = useConnection();
-  const { publicKey, signTransaction, connected } = useWallet();
+  const { connection, publicKey, signTransaction, connected } = useLaunchWallet();
   const navigate = useNavigate();
 
   function reset() {
