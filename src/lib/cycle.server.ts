@@ -546,7 +546,7 @@ async function stepClaim(
         TOKEN_PROGRAM_ID,
         user,
       );
-      const sig = await sendInstructions(conn, signer, claimIxs);
+      const sig = await sendInstructions(conn, signer, claimIxs, 10_000);
       out.push({
         step: "claim",
         ok: true,
@@ -615,7 +615,7 @@ async function stepClaim(
         ),
         ...claimIxs,
       ];
-      const sig = await sendInstructions(conn, signer, ixs);
+      const sig = await sendInstructions(conn, signer, ixs, 10_000);
       out.push({
         step: "claim",
         ok: true,
