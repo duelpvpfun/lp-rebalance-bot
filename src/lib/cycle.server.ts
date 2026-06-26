@@ -982,19 +982,20 @@ export function ensureScheduler(): void {
       .then((r) => {
         if (r.ran) {
           const okSteps = r.steps.filter((s) => s.ok).length;
-          console.log(`[scheduler] cycle ran ok=${r.ok} steps=${okSteps}/${r.steps.length}`);
+          console.log(
+            `[scheduler] step=${r.phase} ok=${r.ok} done=${r.done} (${okSteps}/${r.steps.length} sub-steps)`,
+          );
         }
       })
       .catch((e) => console.error("[scheduler] tick failed:", (e as Error).message));
   };
 
-  // Kick once shortly after boot, then on a fixed interval. We intentionally do
-  // NOT unref() the timer — we WANT it to keep the process alive so the cycle
-  // runs 24/7 on its own, every CYCLE_INTERVAL_SEC, with no browser tab or
-  // external cron. (The website /api/public/tick poll remains a backup that
-  // also fires the cooldown-gated cycle if the host ever recycles the process.)
+  // Fire frequently so the step machine progresses on its own (~one step per
+  // 5s tick). Each step is short and the cooldown gate at the START of a new
+  // cycle still enforces CYCLE_INTERVAL_SEC between full cycles.
   setTimeout(fire, 3000);
-  setInterval(fire, CYCLE_INTERVAL_SEC * 1000);
+  setInterval(fire, 5_000);
 
-  console.log(`[scheduler] started — firing every ${CYCLE_INTERVAL_SEC}s (24/7)`);
+  console.log("[scheduler] started — polling step machine every 5s");
+
 }
