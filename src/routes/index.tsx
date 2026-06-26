@@ -88,7 +88,7 @@ function Index() {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
-              href="https://pump.fun"
+              href={buyUrl}
               target="_blank"
               rel="noreferrer"
               className="rounded-full bg-accent px-6 py-3 font-bold text-accent-foreground shadow-xl transition hover:scale-105"
