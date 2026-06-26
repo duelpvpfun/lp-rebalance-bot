@@ -7,7 +7,7 @@ async function ensureBrowserBuffer() {
   const globalScope = globalThis as any;
   if (globalScope.Buffer?.from) return;
 
-  bufferPromise ??= import("buffer").then((mod: any) => {
+  bufferPromise ??= import("buffer/").then((mod: any) => {
     const BufferCtor = mod.Buffer ?? mod.default?.Buffer;
     if (BufferCtor?.from) {
       globalScope.Buffer = BufferCtor;
