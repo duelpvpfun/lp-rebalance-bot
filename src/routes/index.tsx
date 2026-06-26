@@ -214,7 +214,7 @@ function Index() {
         <h2 className="text-4xl md:text-5xl">FAQ</h2>
         <div className="mt-8 space-y-4">
           <Faq q="Wait, so the dev can't rug me?" a="The dev wallet only ever does three things: claim creator fees, buy $LIQUITITTY, deposit into the LP. No transfers out. Watch it live in the activity section." />
-          <Faq q="How often does it run?" a="Every 5 minutes. The countdown to the next cycle is right at the top of the activity section." />
+          <Faq q="How often does it run?" a="Every 1 minute (test mode). The countdown to the next cycle is right at the top of the activity section." />
           <Faq q="Does the LP keep growing forever?" a="As long as people trade $LIQUITITTY, yes. Trading pays fees → fees become liquidity → bigger LP = less slippage → more trading. Flywheel." />
           <Faq q="What if the price moons between the buy and the deposit?" a="The bot retries the LP with a smaller token amount each pass until the USDC matches. Leftover tokens stay in the wallet and ship on the next cycle." />
           <Faq q="What chain?" a="Solana. PumpSwap pool. USDC pair." />
