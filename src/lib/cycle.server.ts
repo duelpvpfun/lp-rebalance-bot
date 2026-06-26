@@ -619,7 +619,7 @@ async function stepClaim(
   signer: Keypair,
   mint: string,
   tokenDecimals: number,
-  beforeBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken: number) => Promise<void>,
+  afterBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken) => Promise<void>,
 ): Promise<{
   results: StepResult[];
   claimedUsdc: number;
@@ -688,8 +688,9 @@ async function stepClaim(
         TOKEN_PROGRAM_ID,
         user,
       );
-      await beforeBroadcast?.(claimableUsdc, spotPriceUsdcPerToken);
-      const sig = await sendInstructions(conn, signer, claimIxs, 10_000);
+      const sig = await sendInstructions(conn, signer, claimIxs, 10_000, () =>
+        afterBroadcast?.(claimableUsdc, spotPriceUsdcPerToken),
+      );
       out.push({
         step: "claim",
         ok: true,
@@ -758,8 +759,9 @@ async function stepClaim(
         ),
         ...claimIxs,
       ];
-      await beforeBroadcast?.(vaultUsdc, spotPriceUsdcPerToken);
-      const sig = await sendInstructions(conn, signer, ixs, 10_000);
+      const sig = await sendInstructions(conn, signer, ixs, 10_000, () =>
+        afterBroadcast?.(vaultUsdc, spotPriceUsdcPerToken),
+      );
       out.push({
         step: "claim",
         ok: true,
