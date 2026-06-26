@@ -438,21 +438,12 @@ async function burnLpTokens(
 }
 
 /* ============================================================================
- * STEP-BASED CYCLE STATE MACHINE
+ * LOCKED CYCLE STATE MACHINE
  *
- * Serverless hosts (Cloudflare Workers, edge functions) kill requests after
- * ~30s. The old runCycle() did claim → buy → LP → burn in a single request and
- * ran 40–60s, so it got killed mid-flight and only the claim ever landed.
- *
- * Now each tick() call advances exactly ONE step of the current cycle. A cron
- * caller must POST the locked route repeatedly, so a full cycle completes over
- * multiple short calls regardless of host timeouts. The
- * order is fixed: claim → buy → lp → burn, then back to idle for the cooldown.
- *
- * A new cycle's claim only starts after the previous cycle's burn confirms.
- * State lives in this module — Workers reuse isolates so it survives across
- * ticks; if an isolate dies mid-cycle we reset to idle and the next tick
- * starts fresh.
+ * Write paths can only advance through the DB lease and persisted cooldown.
+ * The fixed order is claim → buy → lp → burn. A new claim is only allowed when
+ * the persisted cooldown has ended AND the lease was acquired. Read-only status
+ * calls can never sign transactions.
  * ========================================================================== */
 
 type Phase = "claim" | "buy" | "lp" | "burn";
@@ -1022,8 +1013,8 @@ async function stepBurn(
   return { results: out, ok };
 }
 
-/* ----------------- One-step driver (called by tick) ----------------- */
-export async function runCycleStep(state?: CycleState): Promise<{
+/* ----------------- One-step driver (private; runCycle holds the lease) ----------------- */
+async function runCycleStep(state?: CycleState): Promise<{
   ok: boolean;
   phase: Phase;
   done: boolean;
@@ -1242,20 +1233,13 @@ export async function runCycleStep(state?: CycleState): Promise<{
 }
 
 /**
- * Locked full-cycle runner. One authorized cron POST should execute at most one
- * complete claim → buy → LP → burn pass while holding a single DB lease.
+ * Locked full-cycle runner for internal/manual use. The public legacy route no
+ * longer calls this; the live timer advances with tick() one locked step at a
+ * time to avoid serverless timeouts.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
   if (process.env.BOT_ENABLED !== "true") {
     return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
-  }
-  const signer = loadKeypair();
-  const conn = new Connection(rpcUrl(), "confirmed");
-  const gated = await hardStartGate(conn, signer);
-  if (gated) {
-    await ensureCycleStateRow();
-    await persistCycleState(gated.state);
-    return { ok: true, steps: [gated.step] };
   }
 
   await ensureCycleStateRow();
@@ -1326,10 +1310,10 @@ async function fetchAmmSpotPrice(conn: Connection, mint: string): Promise<number
 }
 
 /* ============================================================================
- * TICK — public entry. Runs at most one step per call.
- *   - "cooldown": idle, waiting for CYCLE_INTERVAL_SEC since last burn.
- *   - "in_flight": another tick is already running a step.
- *   - ran=true: a step executed; phase/done describe progress.
+ * TICK — one-step public entry. GET status routes never call this. The website
+ * only POSTs when the server-reported timer hits zero or a cycle is already in
+ * progress, so a full cycle advances claim → buy → LP → burn without one long
+ * request and without random read-only polls signing transactions.
  * ========================================================================== */
 
 let inFlight: Promise<{
@@ -1370,12 +1354,7 @@ export async function cycleStatus(): Promise<TickStatus> {
   const conn = new Connection(rpcUrl(), "confirmed");
   const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
   const lastCycleAt = typeof lastSigSec === "number" ? lastSigSec : null;
-  const secondsUntilNext =
-    lastSigSec === "error"
-      ? CYCLE_INTERVAL_SEC
-      : typeof lastSigSec === "number"
-        ? Math.max(0, lastSigSec + CYCLE_INTERVAL_SEC - Math.floor(now / 1000))
-        : 0;
+  const secondsUntilNext = Math.max(0, Math.ceil((state.cooldownUntilMs - now) / 1000));
 
   if (active) {
     return { ran: false, reason: "in_flight", phase: state.phase, secondsUntilNext, lastCycleAt };
@@ -1401,11 +1380,10 @@ export async function tick(): Promise<TickResult> {
   if (!leasedState) {
     const locked = (await readCycleState()) ?? (await ensureCycleStateRow());
     lastKnownPhase = locked.cycleStartMs > 0 ? locked.phase : "idle";
-    const secondsUntilNext = Math.max(1, Math.ceil((locked.cooldownUntilMs - now) / 1000));
-    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext };
+    const secondsUntilNext = Math.max(0, Math.ceil((locked.cooldownUntilMs - now) / 1000));
+    return { ran: false, reason: locked.cycleStartMs > 0 ? "in_flight" : "cooldown", phase: lastKnownPhase, secondsUntilNext };
   }
 
-  // Cooldown only gates the START of a new cycle. Mid-cycle ticks always run.
   const atStartOfCycle = leasedState.cycleStartMs === 0;
 
   if (atStartOfCycle) {
@@ -1455,7 +1433,7 @@ export async function tick(): Promise<TickResult> {
     lastKnownPhase = nextPhase;
     const secondsUntilNext = r.done
       ? Math.max(1, Math.ceil((r.state.cooldownUntilMs - Date.now()) / 1000))
-      : 4;
+      : 0;
     return {
       ran: true,
       ok: r.ok,
