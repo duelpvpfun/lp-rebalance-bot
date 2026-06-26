@@ -190,9 +190,27 @@ function loadPubkey(): string {
   return kp.publicKey.toBase58();
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 async function fetchDex(mint: string): Promise<DexStats> {
+  const empty: DexStats = {
+    priceUsd: null, marketCapUsd: null, liquidityUsd: null,
+    liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null,
+  };
   try {
-    const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8_000);
+    const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
     if (!r.ok) throw new Error(`${r.status}`);
     const j = (await r.json()) as { pairs?: Array<Record<string, unknown>> };
     const pairs = j.pairs ?? [];
@@ -216,12 +234,7 @@ async function fetchDex(mint: string): Promise<DexStats> {
       ) ??
       pairs.find((p) => (p.quoteToken as { symbol?: string })?.symbol === "USDC") ??
       pairs[0];
-    if (!pair) {
-      return {
-        priceUsd: null, marketCapUsd: null, liquidityUsd: null,
-        liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null,
-      };
-    }
+    if (!pair) return empty;
     return {
       priceUsd: pair.priceUsd ? Number(pair.priceUsd) : null,
       marketCapUsd:
@@ -233,12 +246,10 @@ async function fetchDex(mint: string): Promise<DexStats> {
       dex: (pair.dexId as string | undefined) ?? null,
     };
   } catch {
-    return {
-      priceUsd: null, marketCapUsd: null, liquidityUsd: null,
-      liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null,
-    };
+    return empty;
   }
 }
+
 
 const TOKEN_SUPPLY_FALLBACK = 1_000_000_000;
 
