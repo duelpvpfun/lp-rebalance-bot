@@ -209,6 +209,7 @@ async function readPoolReserves(
 ): Promise<Partial<DexStats> | null> {
   try {
     const mintPk = new PublicKey(mint);
+    const { OnlinePumpAmmSdk } = await pumpSwap();
     const sdk = new OnlinePumpAmmSdk(conn);
     const pool = await sdk.fetchPool(poolPk);
     const [baseBal, quoteBal, tokenSupply] = await Promise.all([
