@@ -1350,14 +1350,14 @@ export type TickResult =
       nextPhase: Phase | "idle";
       steps: StepResult[];
       secondsUntilNext: number;
-      lastCycleAt: number | null;
+      lastCycleAt?: number | null;
     }
   | {
       ran: false;
       reason: "cooldown" | "in_flight";
       phase: Phase | "idle";
       secondsUntilNext: number;
-      lastCycleAt: number | null;
+      lastCycleAt?: number | null;
     };
 
 export type TickStatus = Extract<TickResult, { ran: false }>;
