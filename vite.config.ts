@@ -69,13 +69,11 @@ function browserNodePolyfills(): Plugin {
     configEnvironment(name) {
       if (name !== "client") return null;
       return {
-        plugins: [
-          nodePolyfills({
-            include: ["buffer", "process"],
-            globals: { Buffer: true, global: true, process: true },
-            protocolImports: true,
-          }),
-        ],
+        plugins: nodePolyfills({
+          include: ["buffer", "process"],
+          globals: { Buffer: true, global: true, process: true },
+          protocolImports: true,
+        }),
       };
     },
   };
