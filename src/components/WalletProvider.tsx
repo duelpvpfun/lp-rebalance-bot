@@ -7,7 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import type { Connection, Transaction } from "@solana/web3.js";
+import { loadWeb3 } from "@/lib/solana-client";
 
 const RPC =
   (import.meta as any).env?.VITE_HELIUS_RPC_URL ||
@@ -28,6 +29,11 @@ type BrowserWallet = {
   off?: (event: string, handler: (...args: any[]) => void) => void;
 };
 
+export type WalletPublicKey = {
+  toBase58: () => string;
+  toString: () => string;
+};
+
 export type LaunchWalletInfo = {
   name: WalletName;
   readyState: ReadyState;
@@ -36,12 +42,12 @@ export type LaunchWalletInfo = {
 };
 
 type LaunchWalletContextValue = {
-  connection: Connection;
   wallets: LaunchWalletInfo[];
   walletName: WalletName | null;
-  publicKey: PublicKey | null;
+  publicKey: WalletPublicKey | null;
   connected: boolean;
   connecting: boolean;
+  getConnection: () => Promise<Connection>;
   select: (name: WalletName) => void;
   connect: (name?: WalletName) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -88,9 +94,8 @@ function detectWallets(): LaunchWalletInfo[] {
   });
 }
 
-function normalizePublicKey(value: unknown): PublicKey | null {
+function normalizePublicKey(value: unknown): WalletPublicKey | null {
   if (!value) return null;
-  if (value instanceof PublicKey) return value;
   const asAny = value as any;
   const text =
     typeof value === "string"
@@ -100,19 +105,20 @@ function normalizePublicKey(value: unknown): PublicKey | null {
         : typeof asAny.toString === "function"
           ? asAny.toString()
           : "";
-  try {
-    return text ? new PublicKey(text) : null;
-  } catch {
-    return null;
-  }
+  if (!text) return null;
+  return { toBase58: () => text, toString: () => text };
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
   const [wallets, setWallets] = useState<LaunchWalletInfo[]>(DEFAULT_WALLETS);
   const [walletName, setWalletName] = useState<WalletName | null>(null);
-  const [publicKey, setPublicKey] = useState<PublicKey | null>(null);
+  const [publicKey, setPublicKey] = useState<WalletPublicKey | null>(null);
   const [connecting, setConnecting] = useState(false);
+
+  const getConnection = useCallback(async () => {
+    const { Connection } = await loadWeb3();
+    return new Connection(RPC, "confirmed");
+  }, []);
 
   const select = useCallback((name: WalletName) => {
     setWalletName(name);
@@ -201,18 +207,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<LaunchWalletContextValue>(
     () => ({
-      connection,
       wallets,
       walletName,
       publicKey,
       connected: Boolean(publicKey),
       connecting,
+      getConnection,
       select,
       connect,
       disconnect,
       signTransaction,
     }),
-    [connection, wallets, walletName, publicKey, connecting, select, connect, disconnect, signTransaction],
+    [wallets, walletName, publicKey, connecting, getConnection, select, connect, disconnect, signTransaction],
   );
 
   return (
