@@ -22,6 +22,7 @@ type Coin = {
   symbol?: string;
   image_url?: string;
   imageUrl?: string;
+  pair_address?: string;
   stats?: Stats;
 };
 
