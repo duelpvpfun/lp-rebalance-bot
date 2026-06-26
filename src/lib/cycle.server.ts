@@ -784,6 +784,7 @@ async function stepBuy(
   mint: string,
   tokenDecimals: number,
   claimedUsdc: number,
+  afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<{ results: StepResult[]; ok: boolean; skip: boolean }> {
   const out: StepResult[] = [];
   if (claimedUsdc < 0.5) {
@@ -830,7 +831,7 @@ async function stepBuy(
         tokenProgram,
         quoteTokenProgram: TOKEN_PROGRAM_ID,
       });
-      const sig = await sendInstructions(conn, signer, buyIxs);
+      const sig = await sendInstructions(conn, signer, buyIxs, 22_000, afterBroadcast);
       out.push({
         step: "swap",
         ok: true,
@@ -856,7 +857,7 @@ async function stepBuy(
         spendUsdcRaw,
         SLIPPAGE_BPS / 100,
       );
-      const sig = await sendInstructions(conn, signer, buyIxs);
+      const sig = await sendInstructions(conn, signer, buyIxs, 22_000, afterBroadcast);
       out.push({
         step: "swap",
         ok: true,
