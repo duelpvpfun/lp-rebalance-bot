@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { readCycleStatus } from "@/lib/cycle.server";
+import { cycleStatus } from "@/lib/cycle.server";
 
 /**
  * Status-only endpoint for the website timer.
@@ -16,8 +16,8 @@ const CORS = {
 
 async function status() {
   try {
-    const result = await readCycleStatus();
-    return Response.json(result, { headers: CORS });
+    const result = await cycleStatus();
+    return Response.json({ ran: false, ...result }, { headers: CORS });
   } catch (e) {
     return Response.json(
       { ran: false, error: (e as Error).message },
