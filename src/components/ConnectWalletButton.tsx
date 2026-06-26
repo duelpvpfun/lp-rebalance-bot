@@ -1,6 +1,6 @@
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
 import { Wallet } from "lucide-react";
+import { useLaunchWallet, type LaunchWalletInfo } from "./WalletProvider";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 
 export function ConnectWalletButton({ className = "" }: { className?: string }) {
-  const { wallets, select, connect, connected, publicKey, disconnect, connecting } = useWallet();
+  const { wallets, select, connect, connected, publicKey, disconnect, connecting } = useLaunchWallet();
   const [open, setOpen] = useState(false);
 
   if (connected && publicKey) {
@@ -54,26 +54,29 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            {wallets.map((w) => (
+            {wallets.map((w: LaunchWalletInfo) => (
               <button
-                key={w.adapter.name}
+                key={w.name}
                 type="button"
                 className="flex items-center gap-3 rounded-md border border-border bg-secondary/30 px-3 py-3 text-sm hover:border-accent"
                 onClick={async () => {
                   try {
-                    select(w.adapter.name);
-                    await new Promise((r) => setTimeout(r, 50));
-                    await connect();
+                    if (w.readyState !== "Installed") {
+                      window.open(w.installUrl, "_blank", "noopener,noreferrer");
+                      return;
+                    }
+                    select(w.name);
+                    await connect(w.name);
                     setOpen(false);
                   } catch (e) {
                     console.error(e);
                   }
                 }}
               >
-                {w.adapter.icon && (
-                  <img src={w.adapter.icon} alt="" className="h-6 w-6" />
+                {w.icon && (
+                  <img src={w.icon} alt="" className="h-6 w-6" />
                 )}
-                <span className="font-semibold">{w.adapter.name}</span>
+                <span className="font-semibold">{w.name}</span>
                 <span className="ml-auto text-xs text-muted-foreground">
                   {w.readyState}
                 </span>
