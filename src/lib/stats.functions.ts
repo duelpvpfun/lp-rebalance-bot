@@ -118,41 +118,11 @@ export type WalletTx = {
 };
 
 function orderCycleTxs(txs: WalletTx[]): WalletTx[] {
-  const oldestFirst = [...txs].sort((a, b) => {
-    const timeA = a.blockTime ?? 0;
-    const timeB = b.blockTime ?? 0;
-    if (timeA !== timeB) return timeA - timeB;
-    return CYCLE_LABEL_ORDER[a.label] - CYCLE_LABEL_ORDER[b.label];
-  });
-
-  const groups: WalletTx[][] = [];
-  let current: WalletTx[] = [];
-  let expected = 1;
-
-  for (const tx of oldestFirst) {
-    const order = CYCLE_LABEL_ORDER[tx.label];
-    if (order === 1) {
-      if (current.length === 4) groups.push(current);
-      current = [tx];
-      expected = 2;
-      continue;
-    }
-    if (current.length > 0 && order === expected) {
-      current.push(tx);
-      expected += 1;
-      if (current.length === 4) {
-        groups.push(current);
-        current = [];
-        expected = 1;
-      }
-    }
-  }
-
-  // Flatten complete cycles and show newest transaction first, oldest last.
-  return groups
-    .flatMap((group) => group)
+  // Show every classified action, newest first. No cycle-grouping filter —
+  // partial cycles, retries, and out-of-order steps all surface.
+  return [...txs]
     .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
-    .slice(0, 20);
+    .slice(0, 40);
 }
 
 export type StatsPayload = {
