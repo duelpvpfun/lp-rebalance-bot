@@ -2,7 +2,7 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
-import type { Plugin } from "vite";
+import { perEnvironmentPlugin, type Plugin } from "vite";
 
 // Some @solana/* v2 packages only declare `browser`/`node` export conditions
 // (no `workerd`/`default`), and the workerd build can't pick a file. The v6
@@ -60,56 +60,18 @@ function solanaServerAliasPlugin(): Plugin {
   };
 }
 
-function browserNodePolyfills(): Plugin[] {
-  return nodePolyfills({
-    // We only need the global inject for client-side Solana/web3.js code.
-    // Do not alias Node builtins globally, because the Nitro/Cloudflare bundle
-    // still has server packages that legitimately import node:* modules.
-    exclude: [
-      "_stream_duplex",
-      "_stream_passthrough",
-      "_stream_readable",
-      "_stream_transform",
-      "_stream_writable",
-      "assert",
-      "buffer",
-      "child_process",
-      "cluster",
-      "console",
-      "constants",
-      "crypto",
-      "dgram",
-      "dns",
-      "domain",
-      "events",
-      "fs",
-      "http",
-      "http2",
-      "https",
-      "module",
-      "net",
-      "os",
-      "path",
-      "process",
-      "punycode",
-      "querystring",
-      "readline",
-      "repl",
-      "stream",
-      "string_decoder",
-      "sys",
-      "timers",
-      "timers/promises",
-      "tls",
-      "tty",
-      "url",
-      "util",
-      "vm",
-      "zlib",
-    ],
-    globals: { Buffer: true, global: true, process: true },
-    protocolImports: false,
-  });
+function browserNodePolyfills(): Plugin {
+  // Scope vite-plugin-node-polyfills to the browser/client environment only.
+  // If it runs in Nitro/SSR, it aliases node:buffer to the browser shim and
+  // breaks server packages that need real Node/workerd builtins.
+  return perEnvironmentPlugin("browser-only-node-polyfills", (env) => {
+    if (env.name !== "client") return false;
+    return nodePolyfills({
+      include: ["buffer", "process"],
+      globals: { Buffer: true, global: true, process: true },
+      protocolImports: true,
+    });
+  }) as Plugin;
 }
 
 const sharedAlias = {
