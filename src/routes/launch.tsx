@@ -373,7 +373,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const [statusInfo, setStatusInfo] = useState<LaunchStatus | null>(null);
   const update = (k: keyof Form, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
-  const { connection, publicKey, signTransaction, connected } = useLaunchWallet();
+  const { getConnection, publicKey, signTransaction, connected } = useLaunchWallet();
   const navigate = useNavigate();
 
   function reset() {
@@ -479,9 +479,10 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!prepare || !publicKey || !signTransaction) return;
     try {
       setPhase("signing");
+      const connection = await getConnection();
       const tx = await buildFundingTx({
         connection,
-        payer: publicKey,
+        payer: publicKey.toBase58(),
         devWallet: prepare.devWallet,
         usdcAmount: prepare.fund.usdc,
         solAmount: prepare.fund.sol,

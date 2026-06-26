@@ -1,15 +1,6 @@
 // Client-side helpers: builds the funding transaction the user signs.
-import {
-  Connection,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-} from "@solana/web3.js";
-import {
-  createAssociatedTokenAccountInstruction,
-  createTransferCheckedInstruction,
-  getAssociatedTokenAddressSync,
-} from "@solana/spl-token";
+import type { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { loadSplToken, loadWeb3 } from "@/lib/solana-client";
 
 export const WORKER_BASE_PUBLIC =
   "https://stunning-yodel-r74qvrvjq564cqp5-8787.app.github.dev";
@@ -30,17 +21,26 @@ export type LaunchStatus = {
 
 export async function buildFundingTx(opts: {
   connection: Connection;
-  payer: PublicKey;
+  payer: PublicKey | string;
   devWallet: string;
   usdcAmount: number;
   solAmount: number;
   usdcMint: string;
 }): Promise<Transaction> {
   const { connection, payer, devWallet, usdcAmount, solAmount, usdcMint } = opts;
+  const [web3, splToken] = await Promise.all([loadWeb3(), loadSplToken()]);
+  const { PublicKey, SystemProgram, Transaction } = web3;
+  const {
+    createAssociatedTokenAccountInstruction,
+    createTransferCheckedInstruction,
+    getAssociatedTokenAddressSync,
+  } = splToken;
+
+  const payerPk = typeof payer === "string" ? new PublicKey(payer) : payer;
   const dev = new PublicKey(devWallet);
   const mint = new PublicKey(usdcMint);
 
-  const fromAta = getAssociatedTokenAddressSync(mint, payer);
+  const fromAta = getAssociatedTokenAddressSync(mint, payerPk);
   const toAta = getAssociatedTokenAddressSync(mint, dev);
 
   const tx = new Transaction();
@@ -49,7 +49,7 @@ export async function buildFundingTx(opts: {
   const toAtaInfo = await connection.getAccountInfo(toAta);
   if (!toAtaInfo) {
     tx.add(
-      createAssociatedTokenAccountInstruction(payer, toAta, dev, mint),
+      createAssociatedTokenAccountInstruction(payerPk, toAta, dev, mint),
     );
   }
 
@@ -61,7 +61,7 @@ export async function buildFundingTx(opts: {
         fromAta,
         mint,
         toAta,
-        payer,
+        payerPk,
         usdcRaw,
         6,
       ),
@@ -72,7 +72,7 @@ export async function buildFundingTx(opts: {
   if (lamports > 0) {
     tx.add(
       SystemProgram.transfer({
-        fromPubkey: payer,
+        fromPubkey: payerPk,
         toPubkey: dev,
         lamports,
       }),
@@ -81,7 +81,7 @@ export async function buildFundingTx(opts: {
 
   const { blockhash } = await connection.getLatestBlockhash();
   tx.recentBlockhash = blockhash;
-  tx.feePayer = payer;
+  tx.feePayer = payerPk;
   return tx;
 }
 
