@@ -1,7 +1,21 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { Copy, Rocket, Users, Flame, Sparkles, TrendingUp, Search } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Users, Rocket, Search, ArrowLeft, Upload, X, Info, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import logo from "@/assets/liquititty-logo.webp";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const COMMUNITY_URL = "https://x.com/i/communities/2033361508042780851";
 
@@ -9,292 +23,748 @@ export const Route = createFileRoute("/launch")({
   head: () => ({
     meta: [
       { title: "Launchpad — Liquititty" },
-      { name: "description", content: "Launch self-refilling memecoins. Every coin auto-recycles creator fees back into its own USDC LP." },
+      {
+        name: "description",
+        content:
+          "Launch a self-refilling memecoin. Every 3 minutes the bot claims creator fees, fees the treasury, buys back your token, redeposits the LP and burns the LP tokens.",
+      },
       { property: "og:title", content: "Liquititty Launchpad" },
-      { property: "og:description", content: "Launch a coin that grows its own LP on autopilot." },
+      {
+        property: "og:description",
+        content: "Launch a coin that grows its own LP on autopilot.",
+      },
     ],
   }),
   component: LaunchPage,
 });
 
-type Coin = {
-  ticker: string; name: string; blurb: string; emoji: string;
-  mint: string; dev: string;
-  mcap: number; liq: number; changePct: number; ageMin: number;
-  cycles: number; holders: number; replies: number;
-  hot?: boolean; king?: boolean;
-};
-
-const MOCK: Coin[] = [
-  { ticker: "LIQUITITTY", name: "Liquititty", blurb: "the OG self-refilling memecoin.", emoji: "🍑", mint: "Liq1t1ttyMintCa11111111111111111111111111111", dev: "DEV1qty7sX2bA9", mcap: 842000, liq: 214000, changePct: 38.4, ageMin: 11, cycles: 1342, holders: 4811, replies: 312, king: true, hot: true },
-  { ticker: "FATSTACK", name: "Fat Stack", blurb: "we eat the fees for breakfast.", emoji: "🥞", mint: "FatStackMint22222222222222222222222222222222", dev: "BAGoFwR4q1Mn", mcap: 184200, liq: 51200, changePct: 22.1, ageMin: 42, cycles: 612, holders: 1280, replies: 144, hot: true },
-  { ticker: "JUGZ", name: "Jugz", blurb: "biggest jugs on solana.", emoji: "🍼", mint: "JugzMint333333333333333333333333333333333333", dev: "JG2vbN8pQz", mcap: 96100, liq: 27800, changePct: 9.4, ageMin: 88, cycles: 411, holders: 822, replies: 91 },
-  { ticker: "REFILL", name: "Refill Coin", blurb: "the pool only goes up.", emoji: "🧴", mint: "Refi11Mint444444444444444444444444444444444", dev: "REFnnp02Lk", mcap: 71400, liq: 19500, changePct: -3.2, ageMin: 124, cycles: 287, holders: 519, replies: 47 },
-  { ticker: "BOOBA", name: "Booba", blurb: "two bags. one mission.", emoji: "👯", mint: "BoobaMint555555555555555555555555555555555", dev: "BBA9xnq4eR", mcap: 54320, liq: 14100, changePct: 14.7, ageMin: 198, cycles: 188, holders: 402, replies: 38, hot: true },
-  { ticker: "DRIP", name: "Drip Drip", blurb: "fees go drip drip into LP.", emoji: "💧", mint: "DripMint666666666666666666666666666666666666", dev: "DRP1nM4xL", mcap: 41200, liq: 11200, changePct: 6.8, ageMin: 240, cycles: 142, holders: 311, replies: 22 },
-  { ticker: "MILKY", name: "Milky Way", blurb: "galactic liquidity.", emoji: "🌌", mint: "MilkyMint777777777777777777777777777777777", dev: "MKY8pq2nE", mcap: 28900, liq: 8200, changePct: -1.1, ageMin: 312, cycles: 91, holders: 244, replies: 18 },
-  { ticker: "POOL", name: "Pool Party", blurb: "always 100% paired.", emoji: "🏊", mint: "PoolMint8888888888888888888888888888888888", dev: "PL3vNq0Rt", mcap: 18450, liq: 5400, changePct: 4.4, ageMin: 480, cycles: 60, holders: 188, replies: 11 },
-  { ticker: "BBAG", name: "Big Bag", blurb: "the only bag that refills.", emoji: "💰", mint: "BBagMint99999999999999999999999999999999999", dev: "BBG5tQp", mcap: 12300, liq: 3600, changePct: -8.9, ageMin: 612, cycles: 38, holders: 121, replies: 5 },
-];
-
-function fmt(n: number, p = "") {
-  if (!Number.isFinite(n)) return "—";
-  if (Math.abs(n) >= 1e6) return `${p}${(n / 1e6).toFixed(2)}M`;
-  if (Math.abs(n) >= 1e3) return `${p}${(n / 1e3).toFixed(1)}K`;
-  return `${p}${n.toFixed(0)}`;
-}
-function fmtAge(min: number) {
-  if (min < 60) return `${min}m`;
-  if (min < 1440) return `${Math.floor(min / 60)}h`;
-  return `${Math.floor(min / 1440)}d`;
-}
-function short(s: string) { return s.length > 10 ? `${s.slice(0, 4)}…${s.slice(-4)}` : s; }
-
 function LaunchPage() {
+  const [howOpen, setHowOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"hot" | "new" | "mcap">("hot");
 
-  const king = MOCK.find((c) => c.king) ?? MOCK[0];
-
-  const filtered = useMemo(() => {
-    let arr = MOCK.filter((c) => c.ticker.toLowerCase().includes(q.toLowerCase()) || c.name.toLowerCase().includes(q.toLowerCase()));
-    if (sort === "new") arr = [...arr].sort((a, b) => a.ageMin - b.ageMin);
-    else if (sort === "mcap") arr = [...arr].sort((a, b) => b.mcap - a.mcap);
-    else arr = [...arr].sort((a, b) => Number(b.hot ?? 0) - Number(a.hot ?? 0) || b.changePct - a.changePct);
-    return arr;
-  }, [q, sort]);
-
   return (
-    <div className="pf-theme flex min-h-screen flex-col">
+    <div className="min-h-screen">
       {/* HEADER */}
-      <header className="border-b border-border/60">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 text-sm">
-          <div className="flex items-center gap-4">
-            <Link to="/" className="font-bold text-primary">liquititty.fun</Link>
-            <nav className="hidden gap-3 md:flex">
-              <Link to="/" className="pf-link">home</Link>
-              <a href="https://x.com/liquititty" target="_blank" rel="noreferrer" className="pf-link">twitter</a>
-              <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="pf-link">community</a>
-              <a href="/#how" className="pf-link">how it works</a>
-            </nav>
-          </div>
-          <div className="flex items-center gap-2">
-            <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" aria-label="community" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-secondary/40 hover:border-primary/60">
-              <Users className="h-4 w-4" />
-            </a>
-            <Link to="/launch/create" className="pf-shine inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground">
-              <Rocket className="h-3.5 w-3.5" /> launch a coin
-            </Link>
-          </div>
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-6 py-6">
+        <Link to="/" className="flex items-center gap-3">
+          <img src={logo} alt="Liquititty" className="h-10 w-10 rounded-lg shadow-lg" />
+          <span className="font-display text-xl">LIQUITITTY</span>
+        </Link>
+        <nav className="hidden gap-6 text-sm md:flex">
+          <Link to="/" className="opacity-80 hover:opacity-100">Home</Link>
+          <button type="button" onClick={() => setHowOpen(true)} className="opacity-80 hover:opacity-100">
+            How it works
+          </button>
+          <a href="/#activity" className="opacity-80 hover:opacity-100">Live activity</a>
+        </nav>
+        <div className="flex items-center gap-2">
+          <a
+            href={COMMUNITY_URL}
+            target="_blank"
+            rel="noreferrer"
+            title="Join the community"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 py-2 text-xs font-semibold transition hover:bg-secondary"
+          >
+            <Users className="h-3.5 w-3.5" /> Community
+          </a>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="lp-glow inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-foreground shadow-[0_0_20px_-4px_var(--color-accent)] transition hover:scale-105"
+          >
+            <Rocket className="h-4 w-4" />
+            Launch a coin
+          </button>
         </div>
       </header>
 
-      {/* TICKER */}
-      <div className="overflow-hidden border-b border-border/60 bg-secondary/20 py-2">
-        <div className="pf-ticker-anim flex w-max items-center gap-6 whitespace-nowrap px-4 font-mono text-[11px] uppercase tracking-wider">
-          {[...MOCK, ...MOCK].map((c, i) => (
-            <span key={i} className="flex items-center gap-1.5">
-              <span>{c.emoji}</span>
-              <span className="font-bold">${c.ticker}</span>
-              <span className={c.changePct >= 0 ? "text-primary" : "text-destructive"}>
-                {c.changePct >= 0 ? "+" : ""}{c.changePct.toFixed(1)}%
-              </span>
-              <span className="opacity-50">·</span>
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 pb-16">
-        {/* start a new coin */}
-        <div className="pt-10 text-center">
-          <Link to="/launch/create" className="text-xl font-bold pf-link">start a new coin</Link>
-        </div>
-
-        {/* KING OF THE HILL */}
-        <section className="mt-6 flex flex-col items-center">
-          <div
-            className="pf-shine mb-2 inline-block rounded-md px-3 py-1 text-xs font-black uppercase italic tracking-wide"
-            style={{
-              background: "linear-gradient(180deg, oklch(0.85 0.18 75), oklch(0.65 0.20 45))",
-              color: "#3a1a00",
-              textShadow: "0 1px 0 rgba(255,255,255,0.3)",
-              border: "2px solid oklch(0.50 0.18 40)",
-            }}
-          >
-            👑 king of the hill
+      <main className="mx-auto w-full max-w-6xl px-6 pb-20">
+        {/* HERO */}
+        <section className="pt-6">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-secondary/30 px-4 py-1.5 text-xs uppercase tracking-widest backdrop-blur">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+            Launchpad · USDC pair · Auto-LP every 3 min
           </div>
-          <div className="pf-king p-2">
-            <FeaturedCoin c={king} />
+          <h1 className="font-display text-4xl leading-[1.05] md:text-6xl">
+            LAUNCH A COIN.<br />
+            <span className="text-accent">IT REFILLS ITS OWN LP.</span>
+          </h1>
+          <p className="mt-5 max-w-2xl text-base text-muted-foreground md:text-lg">
+            Every coin launched here runs the Liquititty loop: claim creator fees in USDC,
+            keep 10% for the treasury, swap some to SOL for gas, buy back ~35% into your
+            token, redeposit into PumpSwap, then burn the LP tokens. You ship a coin. The
+            bot ships liquidity. Forever.
+          </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="lp-glow inline-flex items-center gap-2 rounded-full bg-accent px-7 py-3 font-bold text-accent-foreground shadow-[0_0_32px_-4px_var(--color-accent)] transition hover:scale-105"
+            >
+              <Rocket className="h-5 w-5" />
+              Launch a coin
+            </button>
+            <button
+              type="button"
+              onClick={() => setHowOpen(true)}
+              className="rounded-full border border-border px-6 py-3 font-semibold backdrop-blur transition hover:bg-secondary/40"
+            >
+              How it works
+            </button>
           </div>
         </section>
 
         {/* SEARCH */}
-        <div className="mx-auto mt-10 flex max-w-2xl items-center gap-2">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="search for token"
-            className="flex-1 rounded-md border border-border bg-input/60 px-4 py-2.5 text-sm outline-none focus:border-primary"
-          />
-          <button type="button" className="rounded-md bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground">
+        <div className="mx-auto mt-14 flex max-w-2xl items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-60" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="search for token"
+              className="w-full rounded-full border border-border bg-secondary/30 py-2.5 pl-9 pr-4 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-accent"
+            />
+          </div>
+          <button type="button" className="rounded-full bg-accent px-5 py-2.5 text-sm font-bold text-accent-foreground">
             search
           </button>
         </div>
 
-        {/* FILTERS */}
-        <div className="mt-10 flex flex-wrap items-center gap-3 border-b border-border/60 pb-3 text-sm">
-          <span className="font-bold text-primary">Terminal</span>
-          <span className="text-muted-foreground">·</span>
-          <SortPill icon={<Flame className="h-3 w-3" />} label="hot" active={sort === "hot"} onClick={() => setSort("hot")} />
-          <SortPill icon={<Sparkles className="h-3 w-3" />} label="newest" active={sort === "new"} onClick={() => setSort("new")} />
-          <SortPill icon={<TrendingUp className="h-3 w-3" />} label="market cap" active={sort === "mcap"} onClick={() => setSort("mcap")} />
+        {/* TERMINAL */}
+        <div className="mt-12 flex flex-wrap items-center gap-3 border-b border-border/60 pb-3 text-sm">
+          <span className="font-display text-lg text-accent">TERMINAL</span>
+          <span className="opacity-50">·</span>
+          <SortPill label="hot" active={sort === "hot"} onClick={() => setSort("hot")} />
+          <SortPill label="newest" active={sort === "new"} onClick={() => setSort("new")} />
+          <SortPill label="market cap" active={sort === "mcap"} onClick={() => setSort("mcap")} />
           <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_8px_var(--color-primary)]" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent/70 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />
             </span>
-            {filtered.length} live
+            0 live
           </span>
         </div>
 
-        {/* FEED */}
-        <div className="mt-6 grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((c) => <CoinRow key={c.ticker} c={c} />)}
+        {/* EMPTY STATE (real data only — no mocks until backend is wired) */}
+        <div className="mt-10 grid place-items-center rounded-2xl border-2 border-dashed border-border/70 bg-secondary/20 p-12 text-center">
+          <Sparkles className="h-6 w-6 text-accent" />
+          <p className="mt-3 font-display text-xl">no launches yet</p>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground">
+            The launchpad is live but no coins have been deployed yet. Be the first — every
+            coin you launch here will auto-refill its own LP every 3 minutes.
+          </p>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-bold text-accent-foreground transition hover:scale-105"
+          >
+            <Rocket className="h-4 w-4" /> launch the first coin
+          </button>
         </div>
       </main>
 
-      <footer className="mt-auto border-t border-border/60">
-        <div className="mx-auto flex max-w-[1400px] flex-col items-center gap-3 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:justify-between">
+      <footer className="border-t border-border/60">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-3 px-6 py-6 text-xs text-muted-foreground sm:flex-row sm:justify-between">
           <div>liquititty.fun · built on solana · auto-LP on pumpswap</div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-70">v0.0.1</div>
-          <div className="flex items-center gap-2">
-            <a href="https://x.com/liquititty" target="_blank" rel="noreferrer" className="pf-link">twitter</a>
-            <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="pf-link">community</a>
-          </div>
+          <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-foreground">
+            <Users className="h-3.5 w-3.5" /> join the community
+          </a>
         </div>
       </footer>
+
+      <HowItWorksDialog open={howOpen} onClose={() => setHowOpen(false)} />
+      <CreateCoinDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }
 
-function SortPill({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
+function SortPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs ${active ? "bg-primary/20 text-primary" : "border border-border text-muted-foreground hover:text-foreground"}`}
+      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+        active
+          ? "bg-accent text-accent-foreground"
+          : "border border-border text-muted-foreground hover:text-foreground"
+      }`}
     >
-      {icon}
       sort: {label}
     </button>
   );
 }
 
-function CoinAvatar({ c, size = 88 }: { c: Coin; size?: number }) {
+/* ============================================================
+   HOW IT WORKS — modal
+   ============================================================ */
+function HowItWorksDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
-    <div
-      style={{ width: size, height: size }}
-      className="shrink-0 overflow-hidden rounded-sm bg-secondary ring-1 ring-border grid place-items-center text-3xl"
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">How the loop works</DialogTitle>
+          <DialogDescription>
+            Every coin on the Liquititty launchpad runs the same on-chain loop.
+            Fully automated, fully transparent, no human hands on the LP.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-2">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-accent">
+            ⏱ runs every 3 minutes
+          </div>
+          <ol className="space-y-3 text-sm">
+            <Step n={1} title="Claim creator rewards">
+              The bot claims all USDC creator fees accumulated on your pump.fun coin.
+            </Step>
+            <Step n={2} title="10% → treasury fee">
+              10% of the claimed USDC is sent to the Liquititty treasury — that's
+              how the platform stays alive.
+            </Step>
+            <Step n={3} title="Swap dust to SOL">
+              A tiny slice is swapped to SOL to cover network fees for the cycle.
+            </Step>
+            <Step n={4} title="Buy back ~35% into your token">
+              ~35% of the remaining USDC is swapped into your coin via Jupiter.
+              The buy hits your own market — every cycle pushes your chart.
+            </Step>
+            <Step n={5} title="Add 100% to the PumpSwap LP">
+              The bought tokens + matching USDC are deposited into your PumpSwap
+              LP. Price up or down, the bot always pairs the max it can.
+            </Step>
+            <Step n={6} title="Burn the LP tokens">
+              The LP tokens minted from the deposit are burned. Liquidity is
+              locked forever — nobody can pull it. Not you, not us.
+            </Step>
+            <Step n={7} title="Repeat">
+              3 minutes later, it does the whole thing again. And again. And again.
+            </Step>
+          </ol>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-2 w-full rounded-full bg-accent px-4 py-2.5 text-sm font-bold text-accent-foreground transition hover:scale-[1.02]"
+        >
+          got it, let's launch
+        </button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-accent/50 bg-accent/15 text-[11px] font-bold text-accent">
+        {n}
+      </span>
+      <div>
+        <div className="font-semibold">{title}</div>
+        <div className="text-sm text-muted-foreground">{children}</div>
+      </div>
+    </li>
+  );
+}
+
+/* ============================================================
+   LAUNCH A COIN — modal with full form
+   Payload shape is what the backend will receive once wired.
+   ============================================================ */
+type Form = {
+  name: string;
+  ticker: string;
+  description: string;
+  image_url: string;
+  twitter: string;
+  telegram: string;
+  website: string;
+  total_supply: number;
+  buyback_pct: number;
+  cycle_interval_seconds: number;
+  treasury_fee_pct: number;
+  min_claim_usdc: number;
+  initial_sol_buy: number;
+};
+
+const DEFAULT_FORM: Form = {
+  name: "",
+  ticker: "",
+  description: "",
+  image_url: "",
+  twitter: "",
+  telegram: "",
+  website: "",
+  total_supply: 1_000_000_000,
+  buyback_pct: 35,
+  cycle_interval_seconds: 180,
+  treasury_fee_pct: 10,
+  min_claim_usdc: 1,
+  initial_sol_buy: 0.5,
+};
+
+const MAX_INITIAL_BUY_SOL = 87;
+
+function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [form, setForm] = useState<Form>(DEFAULT_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const [step, setStep] = useState<1 | 2>(1);
+  const update = (k: keyof Form, v: any) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name || !form.ticker) {
+      toast.error("Name and ticker required");
+      return;
+    }
+    setSubmitting(true);
+    // UI-only for now — payload mirrors what the backend will accept.
+    // eslint-disable-next-line no-console
+    console.log("[liquititty] create-launch payload:", form);
+    await new Promise((r) => setTimeout(r, 1100));
+    setSubmitting(false);
+    toast.success("Launch flow ready — backend wiring in progress");
+    onClose();
+    setStep(1);
+    setForm(DEFAULT_FORM);
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          onClose();
+          setStep(1);
+        }
+      }}
     >
-      <span>{c.emoji}</span>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">
+            {step === 1 ? "Launch your coin" : "Auto-LP & deployment"}
+          </DialogTitle>
+          <DialogDescription>
+            {step === 1
+              ? "Token metadata — exactly what gets minted on pump.fun (USDC pair)."
+              : "Configure the auto-LP loop. Defaults match the original Liquititty config."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <StepDot active={step === 1} done={step > 1} n={1} label="Token" />
+          <span className="h-px flex-1 bg-border" />
+          <StepDot active={step === 2} done={false} n={2} label="Auto-LP" />
+        </div>
+
+        <TooltipProvider delayDuration={150}>
+          <form onSubmit={onSubmit} className="mt-4 space-y-5">
+            {step === 1 ? (
+              <>
+                <Section title="Token">
+                  <Field label="Name">
+                    <input
+                      className={cls}
+                      value={form.name}
+                      onChange={(e) => update("name", e.target.value)}
+                      placeholder="My Awesome Coin"
+                    />
+                  </Field>
+                  <Field label="Ticker">
+                    <input
+                      className={cls}
+                      value={form.ticker}
+                      onChange={(e) => update("ticker", e.target.value.toUpperCase())}
+                      placeholder="AWESOME"
+                      maxLength={10}
+                    />
+                  </Field>
+                  <Field label="Description" full>
+                    <textarea
+                      className={cls + " min-h-20"}
+                      value={form.description}
+                      onChange={(e) => update("description", e.target.value)}
+                      placeholder="what's the coin about?"
+                    />
+                  </Field>
+                  <Field label="Image" full>
+                    <ImageDrop value={form.image_url} onChange={(v) => update("image_url", v)} />
+                  </Field>
+                </Section>
+
+                <Section title="Links (optional)">
+                  <Field
+                    label="Twitter / X"
+                    hint="Full x.com or twitter.com link, or leave empty. pump.fun rejects malformed links."
+                    full
+                  >
+                    <input
+                      className={cls}
+                      value={form.twitter}
+                      onChange={(e) => update("twitter", e.target.value)}
+                      placeholder="https://x.com/yourhandle"
+                    />
+                  </Field>
+                  <Field label="Telegram" hint="Full t.me link, or empty." full>
+                    <input
+                      className={cls}
+                      value={form.telegram}
+                      onChange={(e) => update("telegram", e.target.value)}
+                      placeholder="https://t.me/yourgroup"
+                    />
+                  </Field>
+                  <Field label="Website" hint="Full https:// URL or empty." full>
+                    <input
+                      className={cls}
+                      value={form.website}
+                      onChange={(e) => update("website", e.target.value)}
+                      placeholder="https://example.com"
+                    />
+                  </Field>
+                </Section>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!form.name || !form.ticker) {
+                        toast.error("Name and ticker required");
+                        return;
+                      }
+                      setStep(2);
+                    }}
+                    className="rounded-full bg-accent px-6 py-2.5 text-sm font-bold text-accent-foreground transition hover:scale-105"
+                  >
+                    next: auto-LP →
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Section title="Auto-LP rules">
+                  <Field
+                    label="Buyback %"
+                    hint="Share of remaining USDC swapped back into your token before redepositing LP. 35% keeps LP perfectly paired."
+                  >
+                    <NumberSuffix
+                      value={form.buyback_pct}
+                      onChange={(v) => update("buyback_pct", v)}
+                      suffix="%"
+                      min={5}
+                      max={95}
+                    />
+                  </Field>
+                  <Field
+                    label="Treasury fee %"
+                    hint="Cut taken off the claimed USDC every cycle, sent to the Liquititty treasury."
+                  >
+                    <NumberSuffix
+                      value={form.treasury_fee_pct}
+                      onChange={(v) => update("treasury_fee_pct", v)}
+                      suffix="%"
+                      min={0}
+                      max={50}
+                    />
+                  </Field>
+                  <Field
+                    label="Cycle interval"
+                    hint="How often the bot fires: claim → buy → LP → burn. Default 180s (3 min)."
+                  >
+                    <NumberSuffix
+                      value={form.cycle_interval_seconds}
+                      onChange={(v) => update("cycle_interval_seconds", v)}
+                      suffix="s"
+                      min={60}
+                      step={30}
+                    />
+                  </Field>
+                  <Field
+                    label="Min claimable USDC"
+                    hint="Skip the cycle if claimable fees are below this — avoids burning gas on dust."
+                  >
+                    <NumberSuffix
+                      value={form.min_claim_usdc}
+                      onChange={(v) => update("min_claim_usdc", v)}
+                      suffix="USDC"
+                      min={0}
+                      step={0.1}
+                    />
+                  </Field>
+                </Section>
+
+                <Section title="Deployment">
+                  <Field
+                    label="Initial buy (SOL)"
+                    hint={`SOL spent on the pump.fun bonding curve at deploy. Capped at ${MAX_INITIAL_BUY_SOL} SOL (curve cap).`}
+                    full
+                  >
+                    <NumberSuffix
+                      value={form.initial_sol_buy}
+                      onChange={(v) =>
+                        update("initial_sol_buy", Math.min(MAX_INITIAL_BUY_SOL, Math.max(0, v)))
+                      }
+                      suffix="SOL"
+                      min={0}
+                      max={MAX_INITIAL_BUY_SOL}
+                      step={0.01}
+                    />
+                  </Field>
+                </Section>
+
+                <div className="rounded-xl border border-accent/30 bg-accent/10 p-4 text-xs leading-relaxed">
+                  <div className="font-bold uppercase tracking-wider text-accent">your loop</div>
+                  <div className="mt-1 text-muted-foreground">
+                    Every {form.cycle_interval_seconds}s · claim USDC · {form.treasury_fee_pct}% to
+                    treasury · ~{form.buyback_pct}% buyback into ${form.ticker || "TOKEN"} ·
+                    redeposit LP on PumpSwap · burn LP tokens · repeat forever.
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:bg-secondary/40"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" /> back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-bold text-accent-foreground transition hover:scale-105 disabled:opacity-50"
+                  >
+                    {submitting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Rocket className="h-4 w-4" />
+                    )}
+                    {submitting ? "preparing…" : "pay & deploy"}
+                  </button>
+                </div>
+                <p className="text-center text-[11px] text-muted-foreground">
+                  backend wiring in progress · UI flow is final
+                </p>
+              </>
+            )}
+          </form>
+        </TooltipProvider>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StepDot({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span
+        className={`grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold ${
+          active || done
+            ? "bg-accent text-accent-foreground"
+            : "border border-border text-muted-foreground"
+        }`}
+      >
+        {n}
+      </span>
+      <span className={active ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+    </span>
+  );
+}
+
+const cls =
+  "mt-1 w-full rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm outline-none transition focus:border-accent focus:bg-secondary/50";
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-secondary/20 p-4">
+      <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-accent">{title}</h3>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">{children}</div>
     </div>
   );
 }
 
-function Chips({ c }: { c: Coin }) {
+function Field({
+  label,
+  full,
+  hint,
+  children,
+}: {
+  label: string;
+  full?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="mb-1 flex items-center gap-1">
-      <span
-        className="pf-chip pf-chip-green inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 !text-[10px] !font-black uppercase tracking-wider"
-        title="auto-LP cycles run for this coin"
-      >
-        🔁 {fmt(c.cycles)}
+    <label className={`block ${full ? "md:col-span-2" : ""}`}>
+      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        {label}
+        {hint && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                tabIndex={-1}
+                className="inline-grid h-3.5 w-3.5 place-items-center rounded-full text-muted-foreground/70 hover:text-accent"
+              >
+                <Info className="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+              {hint}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </span>
-      <span className="pf-chip pf-chip-orange inline-flex items-center rounded-sm px-1.5 py-0.5 !text-[10px] !font-black uppercase tracking-wider tabular-nums" title="USDC sitting in LP">
-        LP {fmt(c.liq, "$")}
-      </span>
-      {c.hot && (
-        <span className="inline-flex items-center gap-0.5 rounded-sm border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-primary">
-          <Flame className="h-2.5 w-2.5" /> hot
+      {children}
+    </label>
+  );
+}
+
+function NumberSuffix({
+  value,
+  onChange,
+  suffix,
+  min,
+  max,
+  step,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  suffix?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  return (
+    <div className="relative mt-1">
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={cls + " mt-0 pr-14"}
+      />
+      {suffix && (
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] font-semibold text-muted-foreground">
+          {suffix}
         </span>
       )}
     </div>
   );
 }
 
-function FeaturedCoin({ c }: { c: Coin }) {
-  return (
-    <div className="relative">
-      <Link to="/launch" className="group flex items-start gap-3 pf-card rounded-md p-2.5">
-        <CoinAvatar c={c} size={64} />
-        <div className="text-xs leading-relaxed">
-          <Chips c={c} />
-          <div className="text-muted-foreground">
-            Created by <span className="text-primary font-semibold">{short(c.dev)}</span>
-          </div>
-          <div className="text-muted-foreground">
-            market cap: <span className="text-primary font-bold">{fmt(c.mcap, "$")}</span>{" "}
-            <span className="ml-1">[badge: 👑]</span>
-          </div>
-          <div className="text-muted-foreground">
-            holders: <span className="text-foreground">{fmt(c.holders)}</span>
-          </div>
-          <div className="mt-1 text-sm font-bold text-foreground group-hover:text-primary">
-            {c.name} <span className="text-muted-foreground font-normal">(ticker: ${c.ticker})</span>
-          </div>
-          <div className="mt-1 font-mono text-[10px] text-muted-foreground/80">
-            CA: {short(c.mint)}
-          </div>
-        </div>
-      </Link>
-    </div>
-  );
-}
+function ImageDrop({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const fileDialogOpenRef = useRef(false);
+  const browseLockedUntilRef = useRef(0);
 
-function CoinRow({ c }: { c: Coin }) {
-  return (
-    <div className="group relative">
-      <Link
-        to="/launch"
-        className="relative flex items-start gap-3 overflow-hidden rounded-md border border-transparent p-2 transition group-hover:border-primary/40 group-hover:bg-primary/5 group-hover:shadow-[0_0_20px_-4px_var(--color-primary)]"
-      >
-        <CoinAvatar c={c} size={88} />
-        <div className="min-w-0 flex-1 text-xs leading-relaxed">
-          <Chips c={c} />
-          <div className="text-muted-foreground">
-            Created by <span className="text-primary font-semibold">{short(c.dev)}</span>
-            <span className="ml-2 opacity-70">· {fmtAge(c.ageMin)}</span>
-          </div>
-          <div className="text-muted-foreground">
-            market cap: <span className="text-primary font-bold">{fmt(c.mcap, "$")}</span>
-            <span className={`ml-2 ${c.changePct >= 0 ? "text-primary" : "text-destructive"}`}>
-              {c.changePct >= 0 ? "+" : ""}{c.changePct.toFixed(1)}%
-            </span>
-          </div>
-          <div className="text-muted-foreground">
-            holders: <span className="text-foreground">{fmt(c.holders)}</span>
-            <span className="ml-3">replies: <span className="text-foreground">{c.replies}</span></span>
-          </div>
-          <div className="mt-1 truncate font-bold text-foreground group-hover:text-primary">
-            {c.name} <span className="text-muted-foreground font-normal">(${c.ticker})</span>
-            <span className="text-muted-foreground font-normal">: {c.blurb}</span>
-          </div>
-          <div className="mt-1.5 font-mono text-[10px] text-muted-foreground/80 truncate">CA: {c.mint}</div>
+  useEffect(() => {
+    const handleFocus = () => {
+      if (!fileDialogOpenRef.current) return;
+      browseLockedUntilRef.current = Date.now() + 1500;
+      window.setTimeout(() => {
+        fileDialogOpenRef.current = false;
+      }, 1500);
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, []);
+
+  const openFilePicker = () => {
+    if (fileDialogOpenRef.current || Date.now() < browseLockedUntilRef.current) return;
+    fileDialogOpenRef.current = true;
+    browseLockedUntilRef.current = Number.POSITIVE_INFINITY;
+    inputRef.current?.click();
+  };
+
+  const onFile = (file: File | undefined | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image");
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error("Image must be under 4MB");
+      return;
+    }
+    const r = new FileReader();
+    r.onload = () => onChange(String(r.result ?? ""));
+    r.onerror = () => toast.error("Could not read file");
+    r.readAsDataURL(file);
+  };
+
+  if (value) {
+    return (
+      <div className="mt-1 flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+        <img
+          src={value}
+          alt="preview"
+          className="h-20 w-20 rounded-lg object-cover ring-1 ring-border"
+        />
+        <div className="flex-1 text-xs text-muted-foreground">
+          image ready · uploads to pump.fun IPFS on deploy
         </div>
-      </Link>
-      <button
-        type="button"
-        onClick={(e) => {
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="rounded-md border border-border bg-background/40 p-1.5 text-muted-foreground hover:border-destructive hover:text-destructive"
+          title="Remove"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDrag(true);
+      }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDrag(false);
+        onFile(e.dataTransfer.files?.[0]);
+      }}
+      role="button"
+      tabIndex={0}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).tagName === "INPUT" || e.button !== 0) return;
+        e.preventDefault();
+        openFilePicker();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          navigator.clipboard.writeText(c.mint);
-          toast.success(`copied ${c.ticker} CA`);
+          openFilePicker();
+        }
+      }}
+      className={`mt-1 grid cursor-pointer place-items-center rounded-lg border-2 border-dashed p-8 text-center transition ${
+        drag ? "border-accent bg-accent/10" : "border-border bg-secondary/20 hover:border-accent/60"
+      }`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          browseLockedUntilRef.current = Date.now() + 1500;
+          onFile(f);
+          e.target.value = "";
         }}
-        title={`Copy contract: ${c.mint}`}
-        className="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md border border-primary/50 bg-background/90 px-2 py-1 font-mono text-[10px] font-semibold text-primary backdrop-blur transition hover:bg-primary hover:text-primary-foreground"
-      >
-        <Copy className="h-3 w-3" /> copy CA
-      </button>
+      />
+      <Upload className="h-6 w-6 text-muted-foreground" />
+      <p className="mt-2 text-sm font-semibold">drop your coin image here</p>
+      <p className="text-xs text-muted-foreground">or click to browse · png, jpg, gif · max 4MB</p>
     </div>
   );
 }
