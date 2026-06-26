@@ -462,6 +462,10 @@ const STATE_ID = "liquititty-auto-lp";
 const LEASE_SECONDS = 180;
 const STALE_CYCLE_MS = 5 * 60 * 1000;
 const MIN_CLAIM_USDC = 0.01;
+const LAST_SIG_READ_RETRIES = 3;
+const LAST_SIG_READ_BACKOFF_MS = 350;
+
+type LastCycleRead = number | "empty" | "error";
 
 type CycleState = {
   phase: Phase;
@@ -637,21 +641,26 @@ function mayHaveBroadcast(steps: StepResult[]): boolean {
 export async function readLastCycleTsSec(
   conn?: Connection,
   wallet?: PublicKey,
-): Promise<number | null> {
+): Promise<LastCycleRead> {
   const c = conn ?? new Connection(rpcUrl(), "confirmed");
   const w = wallet ?? loadKeypair().publicKey;
-  try {
-    // Newest dev-wallet signature of ANY kind at `confirmed` (NOT finalized).
-    // finalized lags 10-30s, so a tx that JUST landed (e.g. the burn we just
-    // sent) is invisible and the next tick re-claims. `confirmed` surfaces it
-    // in ~2-5s. Do not filter by program: claim/buy/LP/burn all count.
-    const sigs = await c.getSignaturesForAddress(w, { limit: 1 }, "confirmed");
-    if (sigs.length === 0) return null;
-    // A signature so fresh it has no blockTime yet still means "just acted".
-    return sigs[0].blockTime ?? Math.floor(Date.now() / 1000);
-  } catch {
-    return null;
+  for (let attempt = 1; attempt <= LAST_SIG_READ_RETRIES; attempt++) {
+    try {
+      // Newest dev-wallet signature of ANY kind at `confirmed` (NOT finalized).
+      // finalized lags 10-30s, so a tx that JUST landed (e.g. the burn we just
+      // sent) is invisible and the next tick re-claims. `confirmed` surfaces it
+      // in ~2-5s. Do not filter by program: claim/buy/LP/burn all count.
+      const sigs = await c.getSignaturesForAddress(w, { limit: 1 }, "confirmed");
+      if (sigs.length === 0) return "empty";
+      // A signature so fresh it has no blockTime yet still means "just acted".
+      return sigs[0].blockTime ?? Math.floor(Date.now() / 1000);
+    } catch {
+      if (attempt < LAST_SIG_READ_RETRIES) {
+        await new Promise((r) => setTimeout(r, LAST_SIG_READ_BACKOFF_MS * attempt));
+      }
+    }
   }
+  return "error";
 }
 
 async function hardStartGate(
@@ -660,7 +669,13 @@ async function hardStartGate(
   nowMs = Date.now(),
 ): Promise<{ step: StepResult; state: CycleState } | null> {
   const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
-  if (lastSigSec && nowMs - lastSigSec * 1000 < CYCLE_INTERVAL_SEC * 1000) {
+  if (lastSigSec === "error") {
+    return {
+      step: { step: "skip", ok: true, info: { reason: "rpc_unavailable" } },
+      state: cooldownState(nowMs),
+    };
+  }
+  if (typeof lastSigSec === "number" && nowMs - lastSigSec * 1000 < CYCLE_INTERVAL_SEC * 1000) {
     const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
     return {
       step: { step: "skip", ok: true, info: { reason: "cooldown" } },
@@ -685,7 +700,8 @@ async function walletCooldownState(
   nowMs = Date.now(),
 ): Promise<CycleState | null> {
   const lastSigSec = await readLastCycleTsSec(conn, wallet);
-  if (!lastSigSec) return null;
+  if (lastSigSec === "error") return cooldownState(nowMs);
+  if (lastSigSec === "empty") return null;
   const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
   return nowMs < cooldownUntilMs
     ? { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs }
@@ -1236,7 +1252,11 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
   const gated = await hardStartGate(conn, signer);
-  if (gated) return { ok: true, steps: [gated.step] };
+  if (gated) {
+    await ensureCycleStateRow();
+    await persistCycleState(gated.state);
+    return { ok: true, steps: [gated.step] };
+  }
 
   await ensureCycleStateRow();
   const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1347,9 +1367,12 @@ export async function cycleStatus(): Promise<TickStatus> {
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
   const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
-  const secondsUntilNext = lastSigSec
-    ? Math.max(0, lastSigSec + CYCLE_INTERVAL_SEC - Math.floor(now / 1000))
-    : 0;
+  const secondsUntilNext =
+    lastSigSec === "error"
+      ? CYCLE_INTERVAL_SEC
+      : typeof lastSigSec === "number"
+        ? Math.max(0, lastSigSec + CYCLE_INTERVAL_SEC - Math.floor(now / 1000))
+        : 0;
 
   if (active) {
     return {

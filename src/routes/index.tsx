@@ -169,7 +169,7 @@ function Index() {
             <p className="text-xs uppercase tracking-widest text-accent">On-chain receipts</p>
             <h2 className="mt-2 text-4xl md:text-5xl">DEV WALLET ACTIVITY</h2>
             <p className="mt-3 max-w-2xl text-muted-foreground">
-              Only the three actions the bot is allowed to do: claim, buy, LP.
+              Only the four actions the bot is allowed to do: claim, swap, LP, burn.
               Click any row to verify it on Solscan yourself.
             </p>
           </div>
