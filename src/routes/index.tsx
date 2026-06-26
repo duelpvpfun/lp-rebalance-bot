@@ -326,6 +326,13 @@ function NextCycleTimer() {
   // Source of truth for the countdown: last on-chain dev-wallet tx + 60s.
   // Falls back to runtime cooldown row if no tx yet.
   const [lastCycleAt, setLastCycleAt] = useState<number | null>(data.lastCycleAt);
+  const [targetMs, setTargetMs] = useState(() =>
+    data.cycleRuntime.cooldownUntil
+      ? data.cycleRuntime.cooldownUntil * 1000
+      : data.lastCycleAt
+        ? (data.lastCycleAt + CYCLE_INTERVAL_SEC) * 1000
+        : Date.now() + CYCLE_INTERVAL_SEC * 1000,
+  );
   const [phase, setPhase] = useState<"claim" | "buy" | "lp" | "burn" | "idle">(
     data.cycleRuntime.phase,
   );
@@ -340,20 +347,36 @@ function NextCycleTimer() {
   }, [data.lastCycleAt]);
 
   useEffect(() => {
+    if (data.cycleRuntime.cooldownUntil) {
+      setTargetMs(data.cycleRuntime.cooldownUntil * 1000);
+    }
+  }, [data.cycleRuntime.cooldownUntil]);
+
+  const postingRef = useRef(false);
+  const lastPostAtRef = useRef(0);
+
+  const applyTick = (r: TickResponse) => {
+    if (typeof r.secondsUntilNext === "number") {
+      setTargetMs(Date.now() + Math.max(0, r.secondsUntilNext) * 1000);
+    }
+    if (typeof r.lastCycleAt === "number") {
+      setLastCycleAt((prev) => (!prev || r.lastCycleAt! > prev ? r.lastCycleAt! : prev));
+    }
+    const nextPhase = (r.nextPhase ?? r.phase ?? "idle") as typeof phase;
+    setPhase((prev) => {
+      if (prev !== nextPhase) setPhaseStartedAt(nextPhase === "idle" ? null : Date.now());
+      return nextPhase;
+    });
+    if (r.ran || r.done) queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
+  };
+
+  useEffect(() => {
     if (!mounted) return;
     const poll = async () => {
       try {
         const res = await fetch("/api/public/tick");
         const r = (await res.json()) as TickResponse;
-        if (typeof r.lastCycleAt === "number") {
-          setLastCycleAt((prev) => (!prev || r.lastCycleAt! > prev ? r.lastCycleAt! : prev));
-        }
-        const nextPhase = (r.nextPhase ?? r.phase ?? "idle") as typeof phase;
-        setPhase((prev) => {
-          if (prev !== nextPhase) setPhaseStartedAt(nextPhase === "idle" ? null : Date.now());
-          return nextPhase;
-        });
-        if (r.ran) queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
+        applyTick(r);
       } catch {
         /* keep state */
       }
@@ -363,11 +386,6 @@ function NextCycleTimer() {
     return () => clearInterval(id);
   }, [mounted, queryClient]);
 
-  const targetMs = lastCycleAt
-    ? (lastCycleAt + CYCLE_INTERVAL_SEC) * 1000
-    : data.cycleRuntime.cooldownUntil
-      ? data.cycleRuntime.cooldownUntil * 1000
-      : Date.now() + CYCLE_INTERVAL_SEC * 1000;
   const remaining = Math.max(0, Math.floor((targetMs - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
@@ -375,6 +393,32 @@ function NextCycleTimer() {
   const elapsed = mounted && phaseStartedAt ? Math.max(0, Math.floor((now - phaseStartedAt) / 1000)) : 0;
   const phaseLabel = running ? PHASE_LABEL[phase] ?? phase : null;
   const firing = mounted && !running && remaining === 0;
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (phase === "idle" && remaining > 0) return;
+    if (Date.now() - lastPostAtRef.current < 2_500) return;
+
+    let cancelled = false;
+    const advance = async () => {
+      if (postingRef.current) return;
+      postingRef.current = true;
+      lastPostAtRef.current = Date.now();
+      try {
+        const res = await fetch("/api/public/tick", { method: "POST" });
+        const r = (await res.json()) as TickResponse;
+        if (!cancelled) applyTick(r);
+      } catch {
+        /* keep countdown/status */
+      } finally {
+        postingRef.current = false;
+      }
+    };
+    void advance();
+    return () => {
+      cancelled = true;
+    };
+  }, [mounted, phase, remaining]);
 
   return (
     <div className="rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur min-w-[260px]">
