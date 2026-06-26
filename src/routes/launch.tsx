@@ -205,16 +205,8 @@ function LaunchPage() {
           </Link>
         </div>
 
-        <div className="mt-6 border border-dashed border-border bg-card/30 p-12 text-center text-sm">
-          <Sparkles className="mx-auto h-6 w-6 text-accent" />
-          <p className="mt-3 font-display text-xl">launches live on /coins</p>
-          <p className="mt-2 text-muted-foreground">
-            every coin launched here auto-refills its own LP on PumpSwap.
-          </p>
-          <Link to="/coins" className="mt-4 inline-block pf-link font-bold">
-            see all launches →
-          </Link>
-        </div>
+        <TerminalList query={q} sort={sort} />
+
       </main>
 
       <footer className="mt-auto border-t border-border/60">
