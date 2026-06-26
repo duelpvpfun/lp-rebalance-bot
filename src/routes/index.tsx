@@ -405,7 +405,10 @@ function NextCycleTimer() {
       postingRef.current = true;
       lastPostAtRef.current = Date.now();
       try {
-        const res = await fetch("/api/public/tick", { method: "POST" });
+        const res = await fetch("/api/public/tick", {
+          method: "POST",
+          headers: { "x-liquititty-live-timer": "1" },
+        });
         const r = (await res.json()) as TickResponse;
         if (!cancelled) applyTick(r);
       } catch {
