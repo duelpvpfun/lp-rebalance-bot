@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { Suspense } from "react";
 import logo from "@/assets/liquititty-logo.webp";
-import { getStats, type StatsPayload } from "@/lib/stats.functions";
+import { getStats } from "@/lib/stats.functions";
 
 const statsQuery = queryOptions({
   queryKey: ["stats"],
