@@ -206,7 +206,8 @@ function CoinPage() {
             {/* dexscreener chart — branding hidden via overlay */}
             <div className="mt-6 overflow-hidden rounded-md border border-border bg-card/30">
               {coin.pair_address ? (
-                <div className="relative h-[520px] w-full">
+                <div className="relative h-[360px] w-full sm:h-[520px]">
+
                   <iframe
                     title="chart"
                     src={`https://dexscreener.com/solana/${coin.pair_address}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1`}
