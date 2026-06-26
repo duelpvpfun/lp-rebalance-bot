@@ -538,19 +538,26 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       stage = "sign-tx";
       const signed = await signTransaction(tx);
 
-      stage = "open-connection";
-      const connection = await getConnection();
+      stage = "broadcast";
+      const signedBytes = signed.serialize();
+      let bin = "";
+      const arr = new Uint8Array(signedBytes);
+      for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+      const signedBase64 = btoa(bin);
 
-      stage = "send-tx";
-      const serialized = signed.serialize();
-      const sig = await connection.sendRawTransaction(serialized);
+      const bres = await fetch("/api/public/launch/broadcast", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ signedTransaction: signedBase64 }),
+      });
+      const btext = await bres.text();
+      if (!bres.ok) throw new Error(`broadcast failed (${bres.status}): ${btext}`);
+      const { signature: sig } = JSON.parse(btext) as { signature: string };
       setFundSig(sig);
       toast.success("Funding tx sent");
-
-      stage = "confirm-tx";
-      await connection.confirmTransaction(sig, "confirmed");
       setPhase("polling");
       pollStatus(prepare.pendingId);
+
     } catch (err: any) {
       console.error(`[onSignFunding] failed at stage=${stage}`, err);
       setErrorMsg(`${stage}: ${err?.message ?? String(err) ?? "Sign/send failed"}`);
