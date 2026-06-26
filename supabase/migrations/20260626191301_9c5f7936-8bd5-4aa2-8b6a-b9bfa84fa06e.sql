@@ -1,0 +1,10 @@
+DROP POLICY IF EXISTS coin_activity_public_read ON public.coin_activity;
+DROP POLICY IF EXISTS pending_launches_public_read ON public.pending_launches;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON public.coin_activity FROM anon, authenticated;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON public.pending_launches FROM anon, authenticated;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON public.coin_wallets FROM anon, authenticated;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON public.pending_wallets FROM anon, authenticated;
+GRANT ALL ON public.coin_activity TO service_role;
+GRANT ALL ON public.pending_launches TO service_role;
+GRANT ALL ON public.coin_wallets TO service_role;
+GRANT ALL ON public.pending_wallets TO service_role;
