@@ -815,10 +815,20 @@ export async function runCycleStep(): Promise<{
           cycleState.attempts = 0;
           stepOk = true;
         } else {
-          cycleState.attempts++;
+          // NEVER retry buy: if it actually landed on-chain but confirmation
+          // timed out, a retry would double-buy. Abort the cycle and let the
+          // 1-min cooldown restart cleanly.
+          steps.push({
+            step: "buy",
+            ok: false,
+            error: "buy failed — aborting cycle to avoid double-buy on retry",
+          });
+          abortCycle();
+          done = true;
         }
         break;
       }
+
       case "lp": {
         const r = await stepLp(conn, signer, mint, tokenDecimals, cycleState.spotPrice);
         steps = r.results;
