@@ -30,6 +30,7 @@ import {
   createBurnInstruction,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 
 /**
@@ -137,6 +138,17 @@ async function getTokenDecimals(conn: Connection, mint: string): Promise<number>
   const info = await conn.getParsedAccountInfo(new PublicKey(mint));
   // @ts-expect-error parsed shape
   return info.value?.data?.parsed?.info?.decimals ?? 6;
+}
+
+/**
+ * Detect which token program owns a mint. pump.fun increasingly launches coins
+ * under Token-2022, while USDC is legacy SPL Token — passing the wrong program
+ * makes buys/LP fail with `IncorrectProgramId`, so we always resolve it live.
+ */
+async function getMintTokenProgram(conn: Connection, mint: PublicKey): Promise<PublicKey> {
+  const info = await conn.getAccountInfo(mint);
+  if (info?.owner.equals(TOKEN_2022_PROGRAM_ID)) return TOKEN_2022_PROGRAM_ID;
+  return TOKEN_PROGRAM_ID;
 }
 
 /**
@@ -382,6 +394,9 @@ async function runBondingCurveCycle(
   const usdcPk = new PublicKey(USDC_MINT);
   const user = signer.publicKey;
 
+  // The token may be Token-2022; USDC is always legacy SPL Token.
+  const tokenProgram = await getMintTokenProgram(conn, mintPk);
+
   const pumpSdk = new PumpSdk();
   const onlinePumpSdk = new OnlinePumpSdk(conn);
 
@@ -473,7 +488,7 @@ async function runBondingCurveCycle(
   try {
     const global = await onlinePumpSdk.fetchGlobal();
     const feeConfig = await onlinePumpSdk.fetchFeeConfig().catch(() => null);
-    const buyState = await onlinePumpSdk.fetchBuyState(mintPk, user, TOKEN_PROGRAM_ID);
+    const buyState = await onlinePumpSdk.fetchBuyState(mintPk, user, tokenProgram);
     const mintSupply = bondingCurve.tokenTotalSupply ?? null;
 
     // Spot price for seeding our own pool (USDC per token, from virtual reserves).
@@ -501,7 +516,7 @@ async function runBondingCurveCycle(
       amount: expectedTokens,
       quoteAmount: spendUsdcRaw,
       slippage: SLIPPAGE_BPS / 100,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram,
       quoteTokenProgram: TOKEN_PROGRAM_ID,
     });
 
