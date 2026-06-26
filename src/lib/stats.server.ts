@@ -433,7 +433,7 @@ export async function computeStats(): Promise<StatsPayload> {
       pairUrl: null,
       dex: null,
     } satisfies DexStats)),
-    fetchOnchainPool(conn, mint).catch(() => ({})),
+    fetchOnchainPool(conn, mint).catch(() => ({} as Partial<DexStats>)),
     fetchTxs(conn, devWallet, mint).catch(() => []),
     fetchCycleRuntime().catch(() => ({ phase: "idle", cycleStartAt: null, cooldownUntil: null } as const)),
   ]);
