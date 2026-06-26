@@ -146,7 +146,11 @@ async function sendInstructions(
   // or the blockhash expires. This is the pattern Helius/Jito recommend for
   // landing txs reliably on mainnet.
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
-  await onBroadcast?.(sig);
+  try {
+    await onBroadcast?.(sig);
+  } catch (e) {
+    throw new Error(`tx ${sig} broadcast but progress save failed: ${(e as Error).message}`);
+  }
 
   // 22s confirm window — keeps every step well under the serverless 30s host
   // timeout. Each tick runs exactly one step, so we don't need the long 75s
