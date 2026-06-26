@@ -88,7 +88,7 @@ function Index() {
           <p className="mt-6 max-w-lg text-lg text-muted-foreground">
             $LIQUITITTY is a memecoin that pays its own bills. Every time the pool earns
             creator rewards, a robot grabs the cash and shoves it straight back into the
-            liquidity pool. You don't have to trust anyone — it just happens, every 1 minute.
+            liquidity pool. You don't have to trust anyone — it just happens, every 2 minutes.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
