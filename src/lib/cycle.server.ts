@@ -1015,13 +1015,7 @@ export async function runCycleStep(state?: CycleState): Promise<{
   state: CycleState;
 }> {
   if (process.env.BOT_ENABLED !== "true") {
-    return {
-      ok: false,
-      phase: "claim",
-      done: true,
-      steps: [{ step: "disabled", ok: false, info: "BOT_ENABLED is not true" }],
-      state: cooldownState(Date.now()),
-    };
+    return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
   }
   const mint = process.env.TOKEN_MINT_ADDRESS;
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
@@ -1237,10 +1231,7 @@ export async function runCycleStep(state?: CycleState): Promise<{
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
   if (process.env.BOT_ENABLED !== "true") {
-    return {
-      ok: false,
-      steps: [{ step: "disabled", ok: false, info: "BOT_ENABLED is not true" }],
-    };
+    return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
   }
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
@@ -1343,7 +1334,7 @@ export async function readCycleStatus(): Promise<TickStatus> {
 
 export async function tick(): Promise<TickResult> {
   if (process.env.BOT_ENABLED !== "true") {
-    return { ran: false, reason: "cooldown", phase: "idle", secondsUntilNext: 0 };
+    return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
   }
   const now = Date.now();
   if (inFlight) {

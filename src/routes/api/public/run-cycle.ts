@@ -2,9 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { runCycle } from "@/lib/cycle.server";
 
 /**
- * Manual / cron trigger for the auto-LP cycle.
- * The website also runs the cycle automatically via /api/public/tick,
- * so this endpoint is only needed for manual kicks.
+ * Manual / cron trigger for the auto-LP cycle. This is the only route allowed
+ * to execute a cycle, and it requires Bearer CRON_SECRET plus BOT_ENABLED=true.
  */
 export const Route = createFileRoute("/api/public/run-cycle")({
   server: {
