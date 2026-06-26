@@ -153,22 +153,15 @@ function CoinsPage() {
 
                   {/* mini chart */}
                   <div className="mt-2 overflow-hidden rounded-md border border-border/60 bg-background/40">
-                    {c.pair_address ? (
-                      <div className="relative h-32 w-full">
-                        <iframe
-                          title={`chart-${c.mint}`}
-                          src={`https://dexscreener.com/solana/${c.pair_address}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1&header=0`}
-                          className="block h-full w-full"
-                          loading="lazy"
-                        />
-                        {/* mask dexscreener label/branding */}
-                        <div aria-hidden className="pointer-events-none absolute left-0 top-0 h-7 w-32 bg-card" />
-                      </div>
-                    ) : (
-                      <div className="grid h-32 place-items-center text-[10px] text-muted-foreground">
-                        chart pending
-                      </div>
-                    )}
+                    <div className="relative h-32 w-full">
+                      <iframe
+                        title={`chart-${c.mint}`}
+                        src={`https://dexscreener.com/solana/${c.pair_address ?? c.mint}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1&header=0`}
+                        className="block h-full w-full"
+                        loading="lazy"
+                      />
+                      <div aria-hidden className="pointer-events-none absolute left-0 top-0 h-7 w-32 bg-card" />
+                    </div>
                   </div>
 
                   <div className="mt-2 grid grid-cols-2 gap-1.5">
