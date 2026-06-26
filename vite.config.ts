@@ -2,7 +2,7 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
-import { perEnvironmentPlugin, type Plugin } from "vite";
+import type { Plugin } from "vite";
 
 // Some @solana/* v2 packages only declare `browser`/`node` export conditions
 // (no `workerd`/`default`), and the workerd build can't pick a file. The v6
@@ -64,14 +64,21 @@ function browserNodePolyfills(): Plugin {
   // Scope vite-plugin-node-polyfills to the browser/client environment only.
   // If it runs in Nitro/SSR, it aliases node:buffer to the browser shim and
   // breaks server packages that need real Node/workerd builtins.
-  return perEnvironmentPlugin("browser-only-node-polyfills", (env) => {
-    if (env.name !== "client") return false;
-    return nodePolyfills({
-      include: ["buffer", "process"],
-      globals: { Buffer: true, global: true, process: true },
-      protocolImports: true,
-    });
-  }) as Plugin;
+  return {
+    name: "browser-only-node-polyfills",
+    configEnvironment(name) {
+      if (name !== "client") return null;
+      return {
+        plugins: [
+          nodePolyfills({
+            include: ["buffer", "process"],
+            globals: { Buffer: true, global: true, process: true },
+            protocolImports: true,
+          }),
+        ],
+      };
+    },
+  };
 }
 
 const sharedAlias = {
