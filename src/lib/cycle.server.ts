@@ -1393,7 +1393,7 @@ export async function tick(): Promise<TickResult> {
   }
   const now = Date.now();
   if (inFlight) {
-    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3 };
+    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3, lastCycleAt: null };
   }
 
   const owner = `${now}-${Math.random().toString(36).slice(2)}`;
