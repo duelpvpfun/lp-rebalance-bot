@@ -212,6 +212,7 @@ async function addToOwnPool(
   tokenDecimals: number,
   spotPriceUsdcPerToken: number,
   steps: StepResult[],
+  afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<boolean> {
   const mintPk = new PublicKey(mint);
   const usdcPk = new PublicKey(USDC_MINT);
@@ -269,7 +270,7 @@ async function addToOwnPool(
         }),
         ...createIxs,
       ];
-      const sig = await sendInstructions(conn, signer, ixs);
+      const sig = await sendInstructions(conn, signer, ixs, 22_000, afterBroadcast);
       steps.push({
         step: "createPool",
         ok: true,
@@ -329,7 +330,7 @@ async function addToOwnPool(
           }),
           ...lpIxs,
         ];
-        const sig = await sendInstructions(conn, signer, ixs);
+        const sig = await sendInstructions(conn, signer, ixs, 22_000, afterBroadcast);
         steps.push({
           step: "addLiquidity",
           ok: true,
