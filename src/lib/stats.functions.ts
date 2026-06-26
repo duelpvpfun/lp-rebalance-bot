@@ -195,5 +195,5 @@ export const getStats = createServerFn({ method: "GET" }).handler(async (): Prom
   const conn = new Connection(rpcUrl(), "confirmed");
   const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet, mint)]);
   const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
-  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 300 };
+  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60 };
 });
