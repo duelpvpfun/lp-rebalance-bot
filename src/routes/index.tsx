@@ -342,7 +342,7 @@ function NextCycleTimer() {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
       try {
-        const res = await fetch("/api/public/tick", { method: "POST" });
+        const res = await fetch("/api/public/tick", { method: "GET" });
         const result = (await res.json()) as TickResponse;
         const secs = typeof result.secondsUntilNext === "number" ? result.secondsUntilNext : 5;
 
@@ -412,6 +412,9 @@ function NextCycleTimer() {
 
 function TxList() {
   const { data } = useSuspenseQuery(statsQuery);
+  const mounted = useMounted();
+  if (!mounted) return <TxListSkeleton />;
+
   return (
     <div className="mt-8 overflow-hidden rounded-2xl border border-border bg-card/40 backdrop-blur">
       <div className="flex items-center justify-between border-b border-border/60 px-5 py-3 text-xs uppercase tracking-widest text-muted-foreground">
