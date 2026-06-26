@@ -552,8 +552,11 @@ async function acquireCycleLease(owner: string): Promise<CycleState | null> {
     p_lease_seconds: LEASE_SECONDS,
   });
   if (error) throw new Error(`cycle lease failed: ${error.message}`);
-  if (Array.isArray(data) && data.length === 0) return null;
-  return data ? rowToCycleState(data) : null;
+  // SETOF returns an array: empty => another isolate holds the lease.
+  const row = Array.isArray(data) ? data[0] : data;
+  // Guard against an all-NULL composite row (no id) => not acquired.
+  if (!row || (row as { id?: unknown }).id == null) return null;
+  return rowToCycleState(row);
 }
 
 async function persistCycleState(state: CycleState): Promise<void> {
