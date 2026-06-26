@@ -111,6 +111,7 @@ async function sendInstructions(
   ixs: TransactionInstruction[],
   timeoutMs: number = 22_000,
   onBroadcast?: (signature: string) => Promise<void> | void,
+  beforeBroadcast?: () => Promise<void> | void,
 ): Promise<string> {
   // Prepend priority-fee + compute-limit so the tx actually lands on a busy
   // network. Without these, Helius/public RPC frequently sees the blockhash
@@ -140,6 +141,12 @@ async function sendInstructions(
   const tx = new VersionedTransaction(msg);
   tx.sign([signer]);
   const raw = tx.serialize();
+
+  try {
+    await beforeBroadcast?.();
+  } catch (e) {
+    throw new Error(`progress save failed before tx broadcast: ${(e as Error).message}`);
+  }
 
   // Send with skipPreflight + manual rebroadcast loop until the tx confirms
   // or the blockhash expires. This is the pattern Helius/Jito recommend for
@@ -625,7 +632,7 @@ async function stepClaim(
   signer: Keypair,
   mint: string,
   tokenDecimals: number,
-  afterBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken: number) => Promise<void>,
+  beforeBroadcast?: (claimedUsdc: number, spotPriceUsdcPerToken: number) => Promise<void>,
 ): Promise<{
   results: StepResult[];
   claimedUsdc: number;
@@ -694,8 +701,13 @@ async function stepClaim(
         TOKEN_PROGRAM_ID,
         user,
       );
-      const sig = await sendInstructions(conn, signer, claimIxs, 10_000, () =>
-        afterBroadcast?.(claimableUsdc, spotPriceUsdcPerToken),
+      const sig = await sendInstructions(
+        conn,
+        signer,
+        claimIxs,
+        10_000,
+        undefined,
+        () => beforeBroadcast?.(claimableUsdc, spotPriceUsdcPerToken),
       );
       out.push({
         step: "claim",
@@ -765,8 +777,13 @@ async function stepClaim(
         ),
         ...claimIxs,
       ];
-      const sig = await sendInstructions(conn, signer, ixs, 10_000, () =>
-        afterBroadcast?.(vaultUsdc, spotPriceUsdcPerToken),
+      const sig = await sendInstructions(
+        conn,
+        signer,
+        ixs,
+        10_000,
+        undefined,
+        () => beforeBroadcast?.(vaultUsdc, spotPriceUsdcPerToken),
       );
       out.push({
         step: "claim",
@@ -797,11 +814,15 @@ async function stepBuy(
   afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<{ results: StepResult[]; ok: boolean; skip: boolean }> {
   const out: StepResult[] = [];
-  if (claimedUsdc < 0.5) {
+  const walletUsdc = await getTokenUiBalance(conn, signer.publicKey.toBase58(), USDC_MINT);
+  // If earlier claim calls already landed before the state machine reached buy,
+  // include that USDC too. This prevents "many tiny claims -> one tiny buy".
+  const claimBasisUsdc = Math.max(claimedUsdc, walletUsdc);
+  if (claimBasisUsdc < 0.5 || walletUsdc < 0.5) {
     out.push({ step: "skip", ok: true, info: "claimed USDC too small to buy" });
     return { results: out, ok: false, skip: true };
   }
-  const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
+  const buybackUsdcUi = Math.min(claimBasisUsdc * BUYBACK_PCT, walletUsdc * 0.98);
   const spendUsdcRaw = new BN(Math.floor(buybackUsdcUi * 1e6).toString());
   const mintPk = new PublicKey(mint);
   const usdcPk = new PublicKey(USDC_MINT);
@@ -848,6 +869,8 @@ async function stepBuy(
         signature: sig,
         info: {
           spentUsdc: buybackUsdcUi,
+          claimBasisUsdc,
+          walletUsdc,
           estTokens: Number(expectedTokens.toString()) / 10 ** tokenDecimals,
           venue: "bonding_curve",
         },
@@ -872,7 +895,7 @@ async function stepBuy(
         step: "swap",
         ok: true,
         signature: sig,
-        info: { spentUsdc: buybackUsdcUi, venue: "amm" },
+        info: { spentUsdc: buybackUsdcUi, claimBasisUsdc, walletUsdc, venue: "amm" },
       });
     }
     return { results: out, ok: true, skip: false };
@@ -934,8 +957,9 @@ export async function runCycleStep(state?: CycleState): Promise<{
         let broadcastClaimedUsdc = 0;
         let broadcastSpotPrice = 0;
         const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
-          // Pre-advance BEFORE broadcasting claim. If the host dies after send,
-          // the next tick buys 35% of THIS claim instead of claiming again.
+          // Pre-advance BEFORE broadcasting claim. If the host dies after this
+          // point, the next tick buys instead of claiming again, which prevents
+          // spam-claiming the vault and shrinking the eventual buy basis.
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
           await persistCycleProgress({
