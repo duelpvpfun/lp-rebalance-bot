@@ -88,7 +88,7 @@ function Index() {
           <p className="mt-6 max-w-lg text-lg text-muted-foreground">
             $LIQUITITTY is a memecoin that pays its own bills. Every time the pool earns
             creator rewards, a robot grabs the cash and shoves it straight back into the
-            liquidity pool. You don't have to trust anyone — it just happens, every 2 minutes.
+            liquidity pool. You don't have to trust anyone — it just happens, every minute.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
@@ -140,7 +140,7 @@ function Index() {
             { n: "01", t: "Collect the rent", d: "The dev wallet auto-claims creator fees from pump.fun. These arrive as real USDC (dollars)." },
             { n: "02", t: "Buy some $LIQUITITTY", d: "35% of that USDC is used to market-buy $LIQUITITTY on PumpSwap. Yes, that nudges the price up — that's the point." },
             { n: "03", t: "Pair them up", d: "Now the wallet holds fresh $LIQUITITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match." },
-            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 2 minutes ago. Repeat forever." },
+            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was a minute ago. Repeat forever." },
           ].map((s) => (
             <div key={s.n} className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-1 hover:bg-card">
               <div className="font-display text-3xl text-accent">{s.n}</div>
@@ -201,7 +201,7 @@ function Index() {
         <h2 className="text-4xl md:text-5xl">FAQ</h2>
         <div className="mt-8 space-y-4">
           <Faq q="Wait, so the dev can't rug me?" a="The dev wallet only ever does three things: claim creator fees, buy $LIQUITITTY, deposit into the LP. No transfers out. Watch it live in the activity section." />
-          <Faq q="How often does it run?" a="Every 2 minutes. The countdown to the next cycle is right at the top of the activity section." />
+          <Faq q="How often does it run?" a="Every minute. The countdown to the next cycle is right at the top of the activity section." />
           <Faq q="Does the LP keep growing forever?" a="As long as people trade $LIQUITITTY, yes. Trading pays fees → fees become liquidity → bigger LP = less slippage → more trading. Flywheel." />
           <Faq q="What if the price moons between the buy and the deposit?" a="The bot retries the LP with a smaller token amount each pass until the USDC matches. Leftover tokens stay in the wallet and ship on the next cycle." />
           <Faq q="What chain?" a="Solana. PumpSwap pool. USDC pair." />
@@ -315,7 +315,7 @@ const PHASE_LABEL: Record<string, string> = {
   burn: "4/4 · Burning LP tokens (locking liquidity)",
 };
 
-const CYCLE_INTERVAL_SEC = 120;
+const CYCLE_INTERVAL_SEC = 60;
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
@@ -452,7 +452,7 @@ function NextCycleTimer() {
         )}
       </div>
       <div className="text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-        Claim → Swap → LP → Burn · every {Math.round(CYCLE_INTERVAL_SEC / 60)} min
+        Claim → Swap → LP → Burn · every minute
       </div>
     </div>
   );
