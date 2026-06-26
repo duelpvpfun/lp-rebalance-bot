@@ -17,6 +17,7 @@ export type Database = {
       cycle_runtime_state: {
         Row: {
           attempts: number
+          claim_guard_until: string | null
           claimed_usdc: number
           cooldown_until: string
           cycle_start_at: string | null
@@ -29,6 +30,7 @@ export type Database = {
         }
         Insert: {
           attempts?: number
+          claim_guard_until?: string | null
           claimed_usdc?: number
           cooldown_until?: string
           cycle_start_at?: string | null
@@ -41,6 +43,7 @@ export type Database = {
         }
         Update: {
           attempts?: number
+          claim_guard_until?: string | null
           claimed_usdc?: number
           cooldown_until?: string
           cycle_start_at?: string | null
@@ -62,6 +65,7 @@ export type Database = {
         Args: { p_id: string; p_lease_seconds: number; p_owner: string }
         Returns: {
           attempts: number
+          claim_guard_until: string | null
           claimed_usdc: number
           cooldown_until: string
           cycle_start_at: string | null
@@ -89,6 +93,7 @@ export type Database = {
         }
         Returns: {
           attempts: number
+          claim_guard_until: string | null
           claimed_usdc: number
           cooldown_until: string
           cycle_start_at: string | null
