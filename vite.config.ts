@@ -66,25 +66,12 @@ const sharedAlias = {
   "@coral-xyz/anchor": path.resolve(__dirname, "src/lib/anchor-shim.ts"),
 };
 
-function browserBufferAliasPlugin(): Plugin {
-  const bufferEntry = path.resolve(__dirname, "node_modules/buffer/index.js");
-  return {
-    name: "browser-buffer-alias",
-    enforce: "pre",
-    resolveId(source) {
-      if (this.environment?.name !== "client") return null;
-      if (source === "buffer" || source === "buffer/") return bufferEntry;
-      return null;
-    },
-  };
-}
-
 export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
   vite: {
-    plugins: [browserBufferAliasPlugin(), solanaServerAliasPlugin()],
+    plugins: [solanaServerAliasPlugin()],
     resolve: {
       alias: { ...sharedAlias },
     },
