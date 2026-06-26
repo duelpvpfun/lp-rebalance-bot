@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/api/launch/status")({
+export const Route = createFileRoute("/api/public/launch/prepare")({
   server: {
     handlers: {
-      GET: async ({ request }) => {
+      POST: async ({ request }) => {
         const base = process.env.WORKER_BASE_URL;
         const secret = process.env.LAUNCH_HTTP_SECRET;
         if (!base || !secret) {
@@ -12,18 +12,15 @@ export const Route = createFileRoute("/api/launch/status")({
             { status: 500, headers: { "content-type": "application/json" } },
           );
         }
-        const url = new URL(request.url);
-        const id = url.searchParams.get("id");
-        if (!id) {
-          return new Response(JSON.stringify({ error: "id required" }), {
-            status: 400,
-            headers: { "content-type": "application/json" },
-          });
-        }
-        const res = await fetch(
-          `${base}/launch/status?id=${encodeURIComponent(id)}`,
-          { headers: { authorization: `Bearer ${secret}` } },
-        );
+        const body = await request.text();
+        const res = await fetch(`${base}/launch/prepare`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${secret}`,
+          },
+          body,
+        });
         const text = await res.text();
         return new Response(text, {
           status: res.status,

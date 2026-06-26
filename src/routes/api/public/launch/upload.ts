@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 // Proxies image + metadata upload to pump.fun's public IPFS endpoint and
 // returns the metadata URI the worker needs.
-export const Route = createFileRoute("/api/launch/upload")({
+export const Route = createFileRoute("/api/public/launch/upload")({
   server: {
     handlers: {
       POST: async ({ request }) => {

@@ -397,7 +397,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (form.telegram) fd.append("telegram", form.telegram);
     if (form.website) fd.append("website", form.website);
 
-    const r = await fetch("/api/launch/upload", { method: "POST", body: fd });
+    const r = await fetch("/api/public/launch/upload", { method: "POST", body: fd });
     if (!r.ok) {
       const t = await r.text();
       throw new Error("Metadata upload failed: " + t);
@@ -429,7 +429,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
       deployerWallet: publicKey.toBase58(),
       initialBuyUsdc: form.initialBuyUsdc,
     };
-    const r = await fetch("/api/launch/prepare", {
+    const r = await fetch("/api/public/launch/prepare", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -516,7 +516,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
     while (Date.now() < deadline) {
       try {
         const r = await fetch(
-          `/api/launch/status?id=${encodeURIComponent(pendingId)}`,
+          `/api/public/launch/status?id=${encodeURIComponent(pendingId)}`,
         );
         if (r.ok) {
           const j = (await r.json()) as LaunchStatus;
@@ -618,7 +618,10 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
                           placeholder="what's the coin about?"
                         />
                       </Field>
-                      <Field label="Image" full>
+                      <div className="md:col-span-2">
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          Image
+                        </span>
                         <ImageDrop
                           preview={form.imagePreview}
                           onChange={(file, preview) => {
@@ -626,7 +629,8 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
                             update("imagePreview", preview);
                           }}
                         />
-                      </Field>
+                      </div>
+
                     </Section>
 
                     <Section title="Links (optional)">
@@ -1015,13 +1019,7 @@ function ImageDrop({
       }}
       role="button"
       tabIndex={0}
-      onClick={(e) => {
-        // Field wraps us in a <label>; prevent the label's native click from
-        // also opening the file picker (double-open closes the first one).
-        e.preventDefault();
-        e.stopPropagation();
-        inputRef.current?.click();
-      }}
+      onClick={() => inputRef.current?.click()}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
