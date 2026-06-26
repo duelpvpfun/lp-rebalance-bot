@@ -27,6 +27,44 @@ const PUMP_FUN = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 const JUPITER_V4 = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const PUMP_AMM_PROGRAM_ID = new PublicKey(PUMP_AMM);
+const PUMP_FUN_PROGRAM_ID = new PublicKey(PUMP_FUN);
+
+function u16Le(n: number): Buffer {
+  const b = Buffer.alloc(2);
+  b.writeUInt16LE(n, 0);
+  return b;
+}
+
+function pumpAmmPda(seeds: Array<Buffer | Uint8Array>): PublicKey {
+  return PublicKey.findProgramAddressSync(seeds, PUMP_AMM_PROGRAM_ID)[0];
+}
+
+function pumpFunPda(seeds: Array<Buffer | Uint8Array>): PublicKey {
+  return PublicKey.findProgramAddressSync(seeds, PUMP_FUN_PROGRAM_ID)[0];
+}
+
+function poolPdaLocal(index: number, owner: PublicKey, baseMint: PublicKey, quoteMint: PublicKey): PublicKey {
+  return pumpAmmPda([
+    Buffer.from("pool"),
+    u16Le(index),
+    owner.toBuffer(),
+    baseMint.toBuffer(),
+    quoteMint.toBuffer(),
+  ]);
+}
+
+function lpMintPdaLocal(pool: PublicKey): PublicKey {
+  return pumpAmmPda([Buffer.from("pool_lp_mint"), pool.toBuffer()]);
+}
+
+function pumpPoolAuthorityPdaLocal(mint: PublicKey): PublicKey {
+  return pumpFunPda([Buffer.from("pool-authority"), mint.toBuffer()]);
+}
+
+function canonicalPumpPoolPdaLocal(mint: PublicKey, quoteMint: PublicKey): PublicKey {
+  return poolPdaLocal(0, pumpPoolAuthorityPdaLocal(mint), mint, quoteMint);
+}
 
 type ParsedTx = {
   meta?: {
@@ -238,10 +276,9 @@ async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial
   const devWallet = loadPubkey();
 
   // Sum BOTH known pools (our own + canonical) for total liquidity.
-  const { poolPda, canonicalPumpPoolPda } = await pumpSwap();
   const [own, canonical] = await Promise.all([
-    readPoolReserves(conn, mint, poolPda(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk)),
-    readPoolReserves(conn, mint, canonicalPumpPoolPda(mintPk, usdcPk)),
+    readPoolReserves(conn, mint, poolPdaLocal(OWN_POOL_INDEX, new PublicKey(devWallet), mintPk, usdcPk)),
+    readPoolReserves(conn, mint, canonicalPumpPoolPdaLocal(mintPk, usdcPk)),
   ]);
   const pools = [own, canonical].filter((p): p is Partial<DexStats> => !!p);
   if (pools.length > 0) {
@@ -309,9 +346,11 @@ async function fetchBondingCurveStats(conn: Connection, mint: string): Promise<P
 }
 
 async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
-  const { lpMintPda, poolPda } = await pumpSwap();
-  const lpMint = lpMintPda(
-    poolPda(OWN_POOL_INDEX, new PublicKey(wallet), new PublicKey(mint), new PublicKey(USDC_MINT)),
+  // Do not import the PumpSwap SDK just to label activity. A failed SDK bundle
+  // import was making production show an empty feed. These are the same PDA
+  // seeds used by PumpSwap, derived locally with @solana/web3.js only.
+  const lpMint = lpMintPdaLocal(
+    poolPdaLocal(OWN_POOL_INDEX, new PublicKey(wallet), new PublicKey(mint), new PublicKey(USDC_MINT)),
   ).toBase58();
   const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 40 });
   const parsed = await Promise.all(
@@ -385,10 +424,18 @@ export async function computeStats(): Promise<StatsPayload> {
   const devWallet = loadPubkey();
   const conn = new Connection(rpcUrl(), "confirmed");
   const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
-    fetchDex(mint),
-    fetchOnchainPool(conn, mint),
-    fetchTxs(conn, devWallet, mint),
-    fetchCycleRuntime(),
+    fetchDex(mint).catch(() => ({
+      priceUsd: null,
+      marketCapUsd: null,
+      liquidityUsd: null,
+      liquidityToken: null,
+      liquidityUsdc: null,
+      pairUrl: null,
+      dex: null,
+    } satisfies DexStats)),
+    fetchOnchainPool(conn, mint).catch(() => ({})),
+    fetchTxs(conn, devWallet, mint).catch(() => []),
+    fetchCycleRuntime().catch(() => ({ phase: "idle", cycleStartAt: null, cooldownUntil: null } as const)),
   ]);
 
   const dex: DexStats = {
