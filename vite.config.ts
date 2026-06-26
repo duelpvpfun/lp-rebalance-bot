@@ -1,30 +1,30 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import path from "node:path";
 
-// @solana/* packages only declare `browser`/`node` export conditions, with no
-// `workerd`/`worker`/`default` fallback. Rolldown's worker build can't pick a
-// file and errors out. Alias each to its browser ESM bundle.
-const solanaPkgs = [
+// Some @solana/* v2 packages only declare `browser`/`node` export conditions
+// (no `workerd`/`default`). On the workerd/server build we alias them to their
+// browser ESM bundle. On the client build we leave them alone so nested
+// node_modules resolution picks the correct version per importer (v2 for the
+// spl-token chain, v6 for the kit chain).
+const solanaPkgsNeedingWorkerdAlias = [
   "codecs",
-  "codecs-core",
   "codecs-data-structures",
-  "codecs-numbers",
   "codecs-strings",
   "options",
 ];
-const solanaAliases: Record<string, string> = Object.fromEntries(
-  solanaPkgs.map((p) => [
+const workerdSolanaAliases: Record<string, string> = Object.fromEntries(
+  solanaPkgsNeedingWorkerdAlias.map((p) => [
     `@solana/${p}`,
     path.resolve(__dirname, `node_modules/@solana/${p}/dist/index.browser.mjs`),
   ]),
 );
-// @solana/errors is depended on at v2 (codecs/options) and v6 (kit chain).
-// Force the v6 superset everywhere — newer constants are additive, so v2
-// consumers still find what they need.
-solanaAliases["@solana/errors"] = path.resolve(
-  __dirname,
-  "node_modules/@solana/kit/node_modules/@solana/errors/dist/index.browser.mjs",
-);
+
+const sharedAlias = {
+  "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
+  "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
+  "rpc-websockets": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
+  "@coral-xyz/anchor": path.resolve(__dirname, "src/lib/anchor-shim.ts"),
+};
 
 export default defineConfig({
   tanstackStart: {
@@ -32,13 +32,7 @@ export default defineConfig({
   },
   vite: {
     resolve: {
-      alias: {
-        "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
-        "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
-        "rpc-websockets": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
-        "@coral-xyz/anchor": path.resolve(__dirname, "src/lib/anchor-shim.ts"),
-        ...solanaAliases,
-      },
+      alias: { ...sharedAlias },
     },
     ssr: {
       noExternal: [
@@ -48,6 +42,13 @@ export default defineConfig({
         "@pump-fun/agent-payments-sdk",
         /^@solana\/(?!buffer-layout)/,
       ],
+    },
+    environments: {
+      server: {
+        resolve: {
+          alias: { ...sharedAlias, ...workerdSolanaAliases },
+        },
+      },
     },
   },
 });
