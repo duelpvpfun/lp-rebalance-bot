@@ -110,6 +110,7 @@ async function sendInstructions(
   conn: Connection,
   signer: Keypair,
   ixs: TransactionInstruction[],
+  timeoutMs: number = 22_000,
 ): Promise<string> {
   // Prepend priority-fee + compute-limit so the tx actually lands on a busy
   // network. Without these, Helius/public RPC frequently sees the blockhash
@@ -148,7 +149,7 @@ async function sendInstructions(
   // 22s confirm window — keeps every step well under the serverless 30s host
   // timeout. Each tick runs exactly one step, so we don't need the long 75s
   // wait we used when claim+buy+LP+burn ran in a single request.
-  const deadlineMs = Date.now() + 22_000;
+  const deadlineMs = Date.now() + timeoutMs;
   let lastErr: unknown;
   while (Date.now() < deadlineMs) {
     try {
@@ -165,7 +166,7 @@ async function sendInstructions(
     await new Promise((r) => setTimeout(r, 1_500));
   }
   throw new Error(
-    `tx ${sig} did not confirm within 22s${lastErr ? `: ${(lastErr as Error).message}` : ""}`,
+    `tx ${sig} did not confirm within ${Math.round(timeoutMs / 1000)}s${lastErr ? `: ${(lastErr as Error).message}` : ""}`,
   );
 }
 
