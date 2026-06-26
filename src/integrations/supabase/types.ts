@@ -32,6 +32,195 @@ export type Database = {
         }
         Relationships: []
       }
+      coin_activity: {
+        Row: {
+          amount_sol: number | null
+          amount_usdc: number | null
+          created_at: string
+          id: number
+          info: Json | null
+          mint: string
+          ok: boolean
+          signature: string | null
+          step: string
+        }
+        Insert: {
+          amount_sol?: number | null
+          amount_usdc?: number | null
+          created_at?: string
+          id?: number
+          info?: Json | null
+          mint: string
+          ok: boolean
+          signature?: string | null
+          step: string
+        }
+        Update: {
+          amount_sol?: number | null
+          amount_usdc?: number | null
+          created_at?: string
+          id?: number
+          info?: Json | null
+          mint?: string
+          ok?: boolean
+          signature?: string | null
+          step?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "coin_activity_mint_fkey"
+            columns: ["mint"]
+            isOneToOne: false
+            referencedRelation: "coins"
+            referencedColumns: ["mint"]
+          },
+        ]
+      }
+      coin_cycle_state: {
+        Row: {
+          attempts: number
+          claim_guard_until: string | null
+          claimed_usdc: number
+          cooldown_until: string
+          cycle_bucket: number
+          cycle_start_at: string | null
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          mint: string
+          phase: string
+          spot_price: number
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          claim_guard_until?: string | null
+          claimed_usdc?: number
+          cooldown_until?: string
+          cycle_bucket?: number
+          cycle_start_at?: string | null
+          last_error?: string | null
+          lease_expires_at?: string | null
+          lease_owner?: string | null
+          mint: string
+          phase?: string
+          spot_price?: number
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          claim_guard_until?: string | null
+          claimed_usdc?: number
+          cooldown_until?: string
+          cycle_bucket?: number
+          cycle_start_at?: string | null
+          last_error?: string | null
+          lease_expires_at?: string | null
+          lease_owner?: string | null
+          mint?: string
+          phase?: string
+          spot_price?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "coin_cycle_state_mint_fkey"
+            columns: ["mint"]
+            isOneToOne: true
+            referencedRelation: "coins"
+            referencedColumns: ["mint"]
+          },
+        ]
+      }
+      coin_wallets: {
+        Row: {
+          created_at: string
+          encrypted_secret: Json
+          mint: string
+          public_key: string
+          sol_buffer: number
+        }
+        Insert: {
+          created_at?: string
+          encrypted_secret: Json
+          mint: string
+          public_key: string
+          sol_buffer?: number
+        }
+        Update: {
+          created_at?: string
+          encrypted_secret?: Json
+          mint?: string
+          public_key?: string
+          sol_buffer?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "coin_wallets_mint_fkey"
+            columns: ["mint"]
+            isOneToOne: true
+            referencedRelation: "coins"
+            referencedColumns: ["mint"]
+          },
+        ]
+      }
+      coins: {
+        Row: {
+          created_at: string
+          deployer_wallet: string
+          description: string | null
+          enabled: boolean
+          image_url: string | null
+          launched_at: string | null
+          mint: string
+          name: string
+          pair_address: string | null
+          slug: string
+          status: string
+          symbol: string
+          telegram_url: string | null
+          twitter_url: string | null
+          updated_at: string
+          website_url: string | null
+        }
+        Insert: {
+          created_at?: string
+          deployer_wallet: string
+          description?: string | null
+          enabled?: boolean
+          image_url?: string | null
+          launched_at?: string | null
+          mint: string
+          name: string
+          pair_address?: string | null
+          slug: string
+          status?: string
+          symbol: string
+          telegram_url?: string | null
+          twitter_url?: string | null
+          updated_at?: string
+          website_url?: string | null
+        }
+        Update: {
+          created_at?: string
+          deployer_wallet?: string
+          description?: string | null
+          enabled?: boolean
+          image_url?: string | null
+          launched_at?: string | null
+          mint?: string
+          name?: string
+          pair_address?: string | null
+          slug?: string
+          status?: string
+          symbol?: string
+          telegram_url?: string | null
+          twitter_url?: string | null
+          updated_at?: string
+          website_url?: string | null
+        }
+        Relationships: []
+      }
       cycle_minute_runs: {
         Row: {
           created_at: string
@@ -104,11 +293,132 @@ export type Database = {
         }
         Relationships: []
       }
+      pending_launches: {
+        Row: {
+          created_at: string
+          deployer_wallet: string
+          description: string | null
+          dev_wallet: string
+          expires_at: string
+          gas_reserve_sol: number
+          id: string
+          image_url: string | null
+          initial_buy_usdc: number
+          last_error: string | null
+          metadata_uri: string | null
+          mint: string | null
+          name: string
+          slug: string
+          status: string
+          symbol: string
+          telegram_url: string | null
+          twitter_url: string | null
+          website_url: string | null
+        }
+        Insert: {
+          created_at?: string
+          deployer_wallet: string
+          description?: string | null
+          dev_wallet: string
+          expires_at: string
+          gas_reserve_sol?: number
+          id?: string
+          image_url?: string | null
+          initial_buy_usdc: number
+          last_error?: string | null
+          metadata_uri?: string | null
+          mint?: string | null
+          name: string
+          slug: string
+          status?: string
+          symbol: string
+          telegram_url?: string | null
+          twitter_url?: string | null
+          website_url?: string | null
+        }
+        Update: {
+          created_at?: string
+          deployer_wallet?: string
+          description?: string | null
+          dev_wallet?: string
+          expires_at?: string
+          gas_reserve_sol?: number
+          id?: string
+          image_url?: string | null
+          initial_buy_usdc?: number
+          last_error?: string | null
+          metadata_uri?: string | null
+          mint?: string | null
+          name?: string
+          slug?: string
+          status?: string
+          symbol?: string
+          telegram_url?: string | null
+          twitter_url?: string | null
+          website_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_launches_dev_wallet_fkey"
+            columns: ["dev_wallet"]
+            isOneToOne: false
+            referencedRelation: "pending_wallets"
+            referencedColumns: ["public_key"]
+          },
+        ]
+      }
+      pending_wallets: {
+        Row: {
+          created_at: string
+          encrypted_secret: Json
+          public_key: string
+        }
+        Insert: {
+          created_at?: string
+          encrypted_secret: Json
+          public_key: string
+        }
+        Update: {
+          created_at?: string
+          encrypted_secret?: Json
+          public_key?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      acquire_coin_cycle_lease: {
+        Args: {
+          p_bucket: number
+          p_lease_seconds: number
+          p_mint: string
+          p_owner: string
+        }
+        Returns: {
+          attempts: number
+          claim_guard_until: string | null
+          claimed_usdc: number
+          cooldown_until: string
+          cycle_bucket: number
+          cycle_start_at: string | null
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          mint: string
+          phase: string
+          spot_price: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "coin_cycle_state"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       acquire_cycle_runtime_lease: {
         Args: { p_id: string; p_lease_seconds: number; p_owner: string }
         Returns: {
@@ -133,6 +443,36 @@ export type Database = {
         }
       }
       liquititty_fire_tick: { Args: never; Returns: number }
+      reserve_coin_claim: {
+        Args: {
+          p_claimed_usdc: number
+          p_guard_seconds: number
+          p_mint: string
+          p_owner: string
+          p_spot_price: number
+        }
+        Returns: {
+          attempts: number
+          claim_guard_until: string | null
+          claimed_usdc: number
+          cooldown_until: string
+          cycle_bucket: number
+          cycle_start_at: string | null
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          mint: string
+          phase: string
+          spot_price: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "coin_cycle_state"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       reserve_cycle_claim: {
         Args: {
           p_claimed_usdc: number
