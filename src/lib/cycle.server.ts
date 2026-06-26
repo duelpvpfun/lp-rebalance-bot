@@ -921,9 +921,9 @@ export async function runCycleStep(state?: CycleState): Promise<{
     switch (currentPhase) {
       case "claim": {
         const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
-          // Pre-advance before broadcasting claim. If claim lands but the host
-          // times out before returning, the next tick buys 35% of THIS claim
-          // instead of claiming again.
+          // Pre-advance immediately AFTER claim broadcasts. If the host times
+          // out before confirmation returns, the next tick buys 35% of THIS
+          // claim instead of broadcasting another claim.
           await persistCycleProgress({
             ...nextState,
             phase: "buy",
@@ -970,12 +970,14 @@ export async function runCycleStep(state?: CycleState): Promise<{
         break;
       }
       case "buy": {
-        // Pre-advance BEFORE broadcasting the buy. If the serverless request is
-        // killed after the tx is sent but before confirmation returns, the DB is
-        // already on `lp`, so the next tick will NOT buy again. Worst case it
-        // tries to LP with whatever token balance landed; no duplicate buys.
-        await persistCycleProgress({ ...nextState, phase: "lp", attempts: 0 });
+        let buyBroadcast = false;
         const r = await stepBuy(conn, signer, mint, tokenDecimals, nextState.claimedUsdc);
+        buyBroadcast = mayHaveBroadcast(r.results);
+        if (buyBroadcast) {
+          // If buy confirmation times out, this is already persisted as `lp`,
+          // so no future tick can double-buy the same claim.
+          await persistCycleProgress({ ...nextState, phase: "lp", attempts: 0 });
+        }
         steps = r.results;
         if (r.skip) {
           // can't buy → still try to LP whatever we hold next tick.
@@ -1013,11 +1015,11 @@ export async function runCycleStep(state?: CycleState): Promise<{
       }
 
       case "lp": {
-        // Same protection for LP: if the deposit lands but confirmation times
-        // out / the request dies, the next tick burns LP instead of depositing
-        // the same wallet balance twice.
-        await persistCycleProgress({ ...nextState, phase: "burn", attempts: 0 });
-        const r = await stepLp(conn, signer, mint, tokenDecimals, nextState.spotPrice);
+        const r = await stepLp(conn, signer, mint, tokenDecimals, nextState.spotPrice, async () => {
+          // Same protection for LP: once the deposit is broadcast, the next tick
+          // burns LP instead of depositing the same wallet balance twice.
+          await persistCycleProgress({ ...nextState, phase: "burn", attempts: 0 });
+        });
         steps = r.results;
         if (r.ok) {
           nextState.phase = "burn";
