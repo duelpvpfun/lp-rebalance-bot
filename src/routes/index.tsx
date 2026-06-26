@@ -36,7 +36,27 @@ export const Route = createFileRoute("/")({
   notFoundComponent: () => <div className="p-10">Not found.</div>,
 });
 
+function useAutoTick() {
+  useEffect(() => {
+    let cancelled = false;
+    const fire = () => {
+      // Fire-and-forget. The endpoint no-ops during cooldown; we don't
+      // care about the response on the client.
+      fetch("/api/public/tick", { method: "POST" }).catch(() => {});
+    };
+    fire();
+    const id = setInterval(() => {
+      if (!cancelled) fire();
+    }, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+}
+
 function Index() {
+  useAutoTick();
   return (
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
