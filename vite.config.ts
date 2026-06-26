@@ -30,6 +30,7 @@ export default defineConfig({
         "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
         "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
         "rpc-websockets": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
+        "@coral-xyz/anchor": path.resolve(__dirname, "src/lib/anchor-shim.ts"),
         ...solanaAliases,
       },
     },
