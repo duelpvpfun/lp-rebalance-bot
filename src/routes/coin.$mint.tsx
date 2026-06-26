@@ -31,6 +31,14 @@ type Coin = {
   liquidity_usdc?: number;
   liquidity_token?: number;
 };
+type Stats = {
+  price_usd?: number | null;
+  market_cap_usd?: number | null;
+  liquidity_usd?: number | null;
+  liquidity_usdc?: number | null;
+  liquidity_token?: number | null;
+  venue?: string | null;
+} | null;
 
 export const Route = createFileRoute("/coin/$mint")({
   component: CoinPage,
@@ -57,13 +65,15 @@ function CoinPage() {
         `${WORKER_BASE_PUBLIC}/coin?id=${encodeURIComponent(mint)}`,
       );
       if (!r.ok) throw new Error("Failed");
-      return (await r.json()) as { coin: Coin; activity: Activity[] };
+      return (await r.json()) as { coin: Coin; stats: Stats; activity: Activity[] };
     },
-    refetchInterval: 20_000,
-    staleTime: 10_000,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 
   const coin = data?.coin;
+  const stats = data?.stats ?? null;
+
   const activity = (data?.activity ?? []).slice().sort((a, b) => {
     const ta = a.created_at ? Date.parse(a.created_at) : 0;
     const tb = b.created_at ? Date.parse(b.created_at) : 0;
