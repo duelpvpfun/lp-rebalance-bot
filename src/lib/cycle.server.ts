@@ -35,7 +35,7 @@ import {
 
 /**
  * Liquititty auto-cycle (USDC-quoted pump.fun coin).
- * Shared between the cron/manual route and the built-in scheduler.
+ * Shared by the authenticated cron/manual route.
  *
  * The whole cycle runs against the canonical PumpSwap pool via the official
  * SDK — claim, buyback and LP all use the same pool and the same USDC quote
@@ -444,9 +444,9 @@ async function burnLpTokens(
  * ~30s. The old runCycle() did claim → buy → LP → burn in a single request and
  * ran 40–60s, so it got killed mid-flight and only the claim ever landed.
  *
- * Now each tick() call advances exactly ONE step of the current cycle. The
- * frontend (and the in-process scheduler) polls /api/public/tick every ~5s, so
- * a full cycle completes in ~4 ticks (~20s) regardless of host timeouts. The
+ * Now each tick() call advances exactly ONE step of the current cycle. A cron
+ * caller must POST the locked route repeatedly, so a full cycle completes over
+ * multiple short calls regardless of host timeouts. The
  * order is fixed: claim → buy → lp → burn, then back to idle for the cooldown.
  *
  * A new cycle's claim only starts after the previous cycle's burn confirms.
@@ -1014,6 +1014,15 @@ export async function runCycleStep(state?: CycleState): Promise<{
   steps: StepResult[];
   state: CycleState;
 }> {
+  if (process.env.BOT_ENABLED !== "true") {
+    return {
+      ok: false,
+      phase: "claim",
+      done: true,
+      steps: [{ step: "disabled", ok: false, info: "BOT_ENABLED is not true" }],
+      state: cooldownState(Date.now()),
+    };
+  }
   const mint = process.env.TOKEN_MINT_ADDRESS;
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const signer = loadKeypair();
@@ -1227,6 +1236,12 @@ export async function runCycleStep(state?: CycleState): Promise<{
  * whole cycle should call tick() repeatedly. This just runs one step.
  */
 export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
+  if (process.env.BOT_ENABLED !== "true") {
+    return {
+      ok: false,
+      steps: [{ step: "disabled", ok: false, info: "BOT_ENABLED is not true" }],
+    };
+  }
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
   const gated = await hardStartGate(conn, signer);
@@ -1327,6 +1342,9 @@ export async function readCycleStatus(): Promise<TickStatus> {
 }
 
 export async function tick(): Promise<TickResult> {
+  if (process.env.BOT_ENABLED !== "true") {
+    return { ran: false, reason: "cooldown", phase: "idle", secondsUntilNext: 0 };
+  }
   const now = Date.now();
   if (inFlight) {
     return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3 };
@@ -1404,43 +1422,4 @@ export async function tick(): Promise<TickResult> {
   } finally {
     inFlight = null;
   }
-}
-
-
-/**
- * Server-side scheduler. Starts a single setInterval (per server isolate) that
- * fires `tick()` every CYCLE_INTERVAL_SEC. tick() is itself cooldown-gated by
- * the on-chain timestamp + in-memory single-flight lock, so this is safe even
- * if multiple isolates each start their own timer.
- *
- * This removes the dependency on a browser tab / external cron pinging the
- * site — the cycle runs on its own as long as the server process is alive.
- */
-let schedulerStarted = false;
-
-export function ensureScheduler(): void {
-  if (schedulerStarted) return;
-  schedulerStarted = true;
-
-  const fire = () => {
-    tick()
-      .then((r) => {
-        if (r.ran) {
-          const okSteps = r.steps.filter((s) => s.ok).length;
-          console.log(
-            `[scheduler] step=${r.phase} ok=${r.ok} done=${r.done} (${okSteps}/${r.steps.length} sub-steps)`,
-          );
-        }
-      })
-      .catch((e) => console.error("[scheduler] tick failed:", (e as Error).message));
-  };
-
-  // Fire frequently so the step machine progresses on its own (~one step per
-  // 5s tick). Each step is short and the cooldown gate at the START of a new
-  // cycle still enforces CYCLE_INTERVAL_SEC between full cycles.
-  setTimeout(fire, 3000);
-  setInterval(fire, 5_000);
-
-  console.log("[scheduler] started — polling step machine every 5s");
-
 }
