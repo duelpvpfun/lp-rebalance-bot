@@ -10,14 +10,20 @@ const solanaPkgs = [
   "codecs-data-structures",
   "codecs-numbers",
   "codecs-strings",
-  "errors",
   "options",
 ];
-const solanaAliases = Object.fromEntries(
+const solanaAliases: Record<string, string> = Object.fromEntries(
   solanaPkgs.map((p) => [
     `@solana/${p}`,
     path.resolve(__dirname, `node_modules/@solana/${p}/dist/index.browser.mjs`),
   ]),
+);
+// @solana/errors is depended on at v2 (codecs/options) and v6 (kit chain).
+// Force the v6 superset everywhere — newer constants are additive, so v2
+// consumers still find what they need.
+solanaAliases["@solana/errors"] = path.resolve(
+  __dirname,
+  "node_modules/@solana/kit/node_modules/@solana/errors/dist/index.browser.mjs",
 );
 
 export default defineConfig({
