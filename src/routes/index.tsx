@@ -298,17 +298,6 @@ function useMounted() {
   return m;
 }
 
-type TickResponse = {
-  ran?: boolean;
-  ok?: boolean;
-  done?: boolean;
-  phase?: "claim" | "buy" | "lp" | "burn" | "idle";
-  nextPhase?: "claim" | "buy" | "lp" | "burn" | "idle";
-  reason?: "cooldown" | "in_flight";
-  secondsUntilNext?: number;
-  lastCycleAt?: number | null;
-};
-
 const PHASE_LABEL: Record<string, string> = {
   claim: "1/4 · Claiming USDC creator rewards",
   buy: "2/4 · Buying 35% back into $LIQUITITTY",
