@@ -16,6 +16,7 @@ import {
   coinCreatorVaultAtaPda,
   coinCreatorVaultAuthorityPda,
   poolPda,
+  lpMintPda,
 } from "@pump-fun/pump-swap-sdk";
 import {
   PumpSdk,
@@ -26,6 +27,7 @@ import {
 } from "@pump-fun/pump-sdk";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
+  createBurnInstruction,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -307,6 +309,58 @@ async function addToOwnPool(
 }
 
 /**
+ * Burn ALL LP tokens the dev wallet holds for our pool. Creating/seeding a pool
+ * and every deposit mint LP tokens to the dev wallet — burning them permanently
+ * locks that liquidity (it can never be withdrawn by anyone, including us). This
+ * is the on-chain proof that the liquidity is locked forever.
+ */
+async function burnLpTokens(
+  conn: Connection,
+  signer: Keypair,
+  mint: string,
+  steps: StepResult[],
+): Promise<void> {
+  try {
+    const mintPk = new PublicKey(mint);
+    const usdcPk = new PublicKey(USDC_MINT);
+    const userPk = signer.publicKey;
+    const poolPk = poolPda(OWN_POOL_INDEX, userPk, mintPk, usdcPk);
+    const lpMint = lpMintPda(poolPk);
+
+    // LP mints may live under the SPL Token or Token-2022 program — detect which
+    // from the mint's owner so the burn always targets the right program.
+    const lpMintInfo = await conn.getAccountInfo(lpMint);
+    const lpTokenProgram = lpMintInfo?.owner ?? TOKEN_PROGRAM_ID;
+    const lpAta = getAssociatedTokenAddressSync(lpMint, userPk, true, lpTokenProgram);
+
+    const bal = await conn.getTokenAccountBalance(lpAta).catch(() => null);
+    const raw = bal?.value.amount ? BigInt(bal.value.amount) : 0n;
+    if (raw <= 0n) {
+      steps.push({ step: "burnLp", ok: true, info: "no LP tokens to burn" });
+      return;
+    }
+
+    const burnIx = createBurnInstruction(lpAta, lpMint, userPk, raw, [], lpTokenProgram);
+    const ixs: TransactionInstruction[] = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 60_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 60_000),
+      }),
+      burnIx,
+    ];
+    const sig = await sendInstructions(conn, signer, ixs);
+    steps.push({
+      step: "burnLp",
+      ok: true,
+      signature: sig,
+      info: { lpMint: lpMint.toBase58(), burned: bal?.value.uiAmount ?? null },
+    });
+  } catch (e) {
+    steps.push({ step: "burnLp", ok: false, error: (e as Error).message });
+  }
+}
+
+/**
  * Pre-graduation cycle:
  *   1) claim USDC creator fees from the bonding-curve creator vault (V2 — the
  *      quote-mint-aware claim PumpPortal does NOT build for USDC coins),
@@ -477,7 +531,13 @@ async function runBondingCurveCycle(
   await new Promise((r) => setTimeout(r, 4000));
 
   // STEP 3: add the bought token + remaining USDC into our own PumpSwap pool.
-  await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, steps);
+  const lpOk = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, steps);
+
+  // STEP 4: burn the LP tokens we just received so the liquidity is locked forever.
+  if (lpOk) {
+    await new Promise((r) => setTimeout(r, 4000));
+    await burnLpTokens(conn, signer, mint, steps);
+  }
   return { ok: steps.every((s) => s.ok || s.step.startsWith("addLiquidity_retry")), steps };
 }
 
@@ -675,6 +735,12 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
     spotPrice = 0;
   }
   const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPrice, steps);
+
+  // STEP 4: burn the LP tokens we just received so the liquidity is locked forever.
+  if (ok) {
+    await new Promise((r) => setTimeout(r, 4000));
+    await burnLpTokens(conn, signer, mint, steps);
+  }
   return { ok, steps };
 }
 
@@ -811,11 +877,13 @@ export function ensureScheduler(): void {
       .catch((e) => console.error("[scheduler] tick failed:", (e as Error).message));
   };
 
-  // Kick once shortly after boot, then on a fixed interval.
+  // Kick once shortly after boot, then on a fixed interval. We intentionally do
+  // NOT unref() the timer — we WANT it to keep the process alive so the cycle
+  // runs 24/7 on its own, every CYCLE_INTERVAL_SEC, with no browser tab or
+  // external cron. (The website /api/public/tick poll remains a backup that
+  // also fires the cooldown-gated cycle if the host ever recycles the process.)
   setTimeout(fire, 3000);
-  const timer = setInterval(fire, CYCLE_INTERVAL_SEC * 1000);
-  // Don't keep the event loop alive solely for this timer.
-  (timer as { unref?: () => void }).unref?.();
+  setInterval(fire, CYCLE_INTERVAL_SEC * 1000);
 
-  console.log(`[scheduler] started — firing every ${CYCLE_INTERVAL_SEC}s`);
+  console.log(`[scheduler] started — firing every ${CYCLE_INTERVAL_SEC}s (24/7)`);
 }

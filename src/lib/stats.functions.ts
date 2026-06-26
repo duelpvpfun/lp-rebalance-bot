@@ -1,7 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import { OnlinePumpAmmSdk, canonicalPumpPoolPda, poolPda } from "@pump-fun/pump-swap-sdk";
+import {
+  OnlinePumpAmmSdk,
+  canonicalPumpPoolPda,
+  poolPda,
+  lpMintPda,
+} from "@pump-fun/pump-swap-sdk";
 import { PumpSdk, bondingCurvePda } from "@pump-fun/pump-sdk";
 
 const OWN_POOL_INDEX = Number(process.env.LP_POOL_INDEX ?? "1");
@@ -37,14 +42,11 @@ type ParsedTx = {
 };
 
 function tokenDelta(tx: ParsedTx, owner: string, mint: string): number {
-  const pre = (tx.meta?.preTokenBalances ?? []).filter(
-    (b) => b.owner === owner && b.mint === mint,
-  );
+  const pre = (tx.meta?.preTokenBalances ?? []).filter((b) => b.owner === owner && b.mint === mint);
   const post = (tx.meta?.postTokenBalances ?? []).filter(
     (b) => b.owner === owner && b.mint === mint,
   );
-  const sum = (arr: typeof pre) =>
-    arr.reduce((s, b) => s + (b.uiTokenAmount?.uiAmount ?? 0), 0);
+  const sum = (arr: typeof pre) => arr.reduce((s, b) => s + (b.uiTokenAmount?.uiAmount ?? 0), 0);
   return sum(post) - sum(pre);
 }
 
@@ -58,12 +60,18 @@ function classify(
   programIds: Set<string>,
   wallet: string,
   mint: string,
+  lpMint: string,
 ): string | null {
   const tokenD = tokenDelta(tx, wallet, mint);
   const usdcD = tokenDelta(tx, wallet, USDC_MINT);
+  const lpD = tokenDelta(tx, wallet, lpMint);
 
   const touchesPump = programIds.has(PUMP_FUN) || programIds.has(PUMP_AMM);
   const touchesJup = programIds.has(JUPITER_V6) || programIds.has(JUPITER_V4);
+
+  // 0) Burn LP — our LP token balance dropped to/towards zero and no token/USDC
+  //    moved (pure burn). This is the "liquidity locked forever" receipt.
+  if (lpD < 0 && tokenD === 0 && usdcD === 0) return "Burn LP (locked forever)";
 
   // 1) Claim Creator Rewards — USDC came in, no token movement, pump program
   //    touched (works for both bonding-curve and AMM claims).
@@ -132,12 +140,21 @@ async function fetchDex(mint: string): Promise<DexStats> {
       pairs.find((p) => (p.quoteToken as { symbol?: string })?.symbol === "USDC") ??
       pairs[0];
     if (!pair) {
-      return { priceUsd: null, marketCapUsd: null, liquidityUsd: null, liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null };
+      return {
+        priceUsd: null,
+        marketCapUsd: null,
+        liquidityUsd: null,
+        liquidityToken: null,
+        liquidityUsdc: null,
+        pairUrl: null,
+        dex: null,
+      };
     }
     const liq = pair.liquidity as { usd?: number; base?: number; quote?: number } | undefined;
     return {
       priceUsd: pair.priceUsd ? Number(pair.priceUsd) : null,
-      marketCapUsd: (pair.marketCap as number | undefined) ?? (pair.fdv as number | undefined) ?? null,
+      marketCapUsd:
+        (pair.marketCap as number | undefined) ?? (pair.fdv as number | undefined) ?? null,
       liquidityUsd: liq?.usd ?? null,
       liquidityToken: liq?.base ?? null,
       liquidityUsdc: liq?.quote ?? null,
@@ -145,7 +162,15 @@ async function fetchDex(mint: string): Promise<DexStats> {
       dex: (pair.dexId as string | undefined) ?? null,
     };
   } catch {
-    return { priceUsd: null, marketCapUsd: null, liquidityUsd: null, liquidityToken: null, liquidityUsdc: null, pairUrl: null, dex: null };
+    return {
+      priceUsd: null,
+      marketCapUsd: null,
+      liquidityUsd: null,
+      liquidityToken: null,
+      liquidityUsdc: null,
+      pairUrl: null,
+      dex: null,
+    };
   }
 }
 
@@ -191,10 +216,7 @@ async function readPoolReserves(
   }
 }
 
-async function fetchOnchainPool(
-  conn: Connection,
-  mint: string,
-): Promise<Partial<DexStats>> {
+async function fetchOnchainPool(conn: Connection, mint: string): Promise<Partial<DexStats>> {
   const mintPk = new PublicKey(mint);
   const usdcPk = new PublicKey(USDC_MINT);
   const devWallet = loadPubkey();
@@ -217,10 +239,7 @@ async function fetchOnchainPool(
  * read the curve's reserves so the stats boxes populate while the token is
  * still on pump.fun (before it shows up on DexScreener / PumpSwap).
  */
-async function fetchBondingCurveStats(
-  conn: Connection,
-  mint: string,
-): Promise<Partial<DexStats>> {
+async function fetchBondingCurveStats(conn: Connection, mint: string): Promise<Partial<DexStats>> {
   try {
     const mintPk = new PublicKey(mint);
     const sdk = new PumpSdk();
@@ -231,7 +250,10 @@ async function fetchBondingCurveStats(
 
     const [tokenSupply, mintDecimals] = await Promise.all([
       conn.getTokenSupply(mintPk).catch(() => null),
-      conn.getTokenSupply(mintPk).then((r) => r.value.decimals).catch(() => 6),
+      conn
+        .getTokenSupply(mintPk)
+        .then((r) => r.value.decimals)
+        .catch(() => 6),
     ]);
 
     const usdcDecimals = 6;
@@ -260,10 +282,15 @@ async function fetchBondingCurveStats(
 }
 
 async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
+  const lpMint = lpMintPda(
+    poolPda(OWN_POOL_INDEX, new PublicKey(wallet), new PublicKey(mint), new PublicKey(USDC_MINT)),
+  ).toBase58();
   const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 40 });
   const parsed = await Promise.all(
     sigs.map((s) =>
-      conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 }).catch(() => null),
+      conn
+        .getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 })
+        .catch(() => null),
     ),
   );
   const out: WalletTx[] = [];
@@ -282,7 +309,7 @@ async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise
         if (pid) pids.add(pid);
       }
     }
-    const label = classify(tx, pids, wallet, mint);
+    const label = classify(tx, pids, wallet, mint, lpMint);
     if (!label) continue;
     out.push({
       signature: s.signature,
@@ -295,29 +322,31 @@ async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise
   return out;
 }
 
-export const getStats = createServerFn({ method: "GET" }).handler(async (): Promise<StatsPayload> => {
-  const mint = process.env.TOKEN_MINT_ADDRESS;
-  if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
-  const devWallet = loadPubkey();
-  const conn = new Connection(rpcUrl(), "confirmed");
-  const [dexRaw, onchain, txs] = await Promise.all([
-    fetchDex(mint),
-    fetchOnchainPool(conn, mint),
-    fetchTxs(conn, devWallet, mint),
-  ]);
+export const getStats = createServerFn({ method: "GET" }).handler(
+  async (): Promise<StatsPayload> => {
+    const mint = process.env.TOKEN_MINT_ADDRESS;
+    if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
+    const devWallet = loadPubkey();
+    const conn = new Connection(rpcUrl(), "confirmed");
+    const [dexRaw, onchain, txs] = await Promise.all([
+      fetchDex(mint),
+      fetchOnchainPool(conn, mint),
+      fetchTxs(conn, devWallet, mint),
+    ]);
 
-  // Prefer live on-chain pool reserves; fall back to DexScreener per-field so a
-  // value always shows as long as either source has it.
-  const dex: DexStats = {
-    priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
-    marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
-    liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
-    liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
-    liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
-    pairUrl: dexRaw.pairUrl,
-    dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
-  };
+    // Prefer live on-chain pool reserves; fall back to DexScreener per-field so a
+    // value always shows as long as either source has it.
+    const dex: DexStats = {
+      priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
+      marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
+      liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
+      liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
+      liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
+      pairUrl: dexRaw.pairUrl,
+      dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
+    };
 
-  const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
-  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60 };
-});
+    const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
+    return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60 };
+  },
+);
