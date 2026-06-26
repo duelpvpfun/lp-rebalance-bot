@@ -60,6 +60,10 @@ function solanaServerAliasPlugin(): Plugin {
 }
 
 const sharedAlias = {
+  // @solana/web3.js and bn.js import Node's `buffer` module. On the public
+  // browser build Vite otherwise externalizes it to an empty browser stub,
+  // which crashes wallet hydration before the connect button can run.
+  buffer: path.resolve(__dirname, "node_modules/buffer/index.js"),
   "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
