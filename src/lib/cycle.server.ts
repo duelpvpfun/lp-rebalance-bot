@@ -462,6 +462,7 @@ type CycleState = {
   phase: Phase;
   cycleStartMs: number;
   cooldownUntilMs: number;
+  claimGuardUntilMs: number;
   claimedUsdc: number;
   spotPrice: number;
   attempts: number;
@@ -477,6 +478,7 @@ function cooldownState(nowMs = Date.now()): CycleState {
     phase: "claim",
     cycleStartMs: 0,
     cooldownUntilMs: nowMs + CYCLE_INTERVAL_SEC * 1000,
+    claimGuardUntilMs: nowMs + CYCLE_INTERVAL_SEC * 1000,
     claimedUsdc: 0,
     spotPrice: 0,
     attempts: 0,
@@ -490,6 +492,7 @@ function rowToCycleState(raw: unknown): CycleState {
     phase: isPhase(row.phase) ? row.phase : "claim",
     cycleStartMs: row.cycle_start_at ? Date.parse(String(row.cycle_start_at)) : 0,
     cooldownUntilMs: row.cooldown_until ? Date.parse(String(row.cooldown_until)) : Date.now(),
+    claimGuardUntilMs: row.claim_guard_until ? Date.parse(String(row.claim_guard_until)) : 0,
     claimedUsdc: Number(row.claimed_usdc ?? 0),
     spotPrice: Number(row.spot_price ?? 0),
     attempts: Number(row.attempts ?? 0),
@@ -518,6 +521,7 @@ async function ensureCycleStateRow(): Promise<CycleState> {
       phase: starter.phase,
       cycle_start_at: null,
       cooldown_until: new Date(starter.cooldownUntilMs).toISOString(),
+      claim_guard_until: new Date(starter.claimGuardUntilMs).toISOString(),
       claimed_usdc: 0,
       spot_price: 0,
       attempts: 0,
@@ -582,6 +586,7 @@ async function persistCycleState(state: CycleState): Promise<void> {
       phase: state.phase,
       cycle_start_at: state.cycleStartMs > 0 ? new Date(state.cycleStartMs).toISOString() : null,
       cooldown_until: new Date(state.cooldownUntilMs).toISOString(),
+      claim_guard_until: new Date(Math.max(state.claimGuardUntilMs, state.cooldownUntilMs)).toISOString(),
       claimed_usdc: state.claimedUsdc,
       spot_price: state.spotPrice,
       attempts: state.attempts,
@@ -600,6 +605,7 @@ async function persistCycleProgress(state: CycleState): Promise<void> {
       phase: state.phase,
       cycle_start_at: state.cycleStartMs > 0 ? new Date(state.cycleStartMs).toISOString() : null,
       cooldown_until: new Date(state.cooldownUntilMs).toISOString(),
+      claim_guard_until: new Date(Math.max(state.claimGuardUntilMs, state.cooldownUntilMs)).toISOString(),
       claimed_usdc: state.claimedUsdc,
       spot_price: state.spotPrice,
       attempts: state.attempts,
@@ -637,6 +643,7 @@ function freshInMemoryState(): CycleState {
     phase: "claim",
     cycleStartMs: 0,
     cooldownUntilMs: Date.now(),
+    claimGuardUntilMs: Date.now(),
     claimedUsdc: 0,
     spotPrice: 0,
     attempts: 0,
@@ -715,7 +722,7 @@ async function walletCooldownState(
   if (lastSigSec === "empty") return null;
   const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
   return nowMs < cooldownUntilMs
-    ? { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs }
+    ? { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs, claimGuardUntilMs: cooldownUntilMs }
     : null;
 }
 
@@ -1083,6 +1090,7 @@ async function runCycleStep(state?: CycleState): Promise<{
     // truth show "running" and prevents any caller from seeing an expired idle
     // row while the claim step is preparing.
     nextState.cooldownUntilMs = Date.now() + CYCLE_INTERVAL_SEC * 1000;
+    nextState.claimGuardUntilMs = nextState.cooldownUntilMs;
     await persistCycleProgress(nextState);
   }
   const currentPhase = nextState.phase;
@@ -1126,6 +1134,7 @@ async function runCycleStep(state?: CycleState): Promise<{
           claimProgressSaved = true;
           const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
           nextState.cooldownUntilMs = claimGuardCooldown;
+          nextState.claimGuardUntilMs = claimGuardCooldown;
           nextState.phase = "buy";
           nextState.claimedUsdc = expectedClaimedUsdc;
           nextState.spotPrice = spotPriceUsdcPerToken;
@@ -1137,6 +1146,7 @@ async function runCycleStep(state?: CycleState): Promise<{
             spotPrice: spotPriceUsdcPerToken,
             attempts: 0,
             cooldownUntilMs: claimGuardCooldown,
+            claimGuardUntilMs: claimGuardCooldown,
           });
         });
         steps = r.results;
@@ -1241,6 +1251,7 @@ async function runCycleStep(state?: CycleState): Promise<{
         await persistCycleProgress({
           ...nextState,
           cooldownUntilMs: Date.now() + CYCLE_INTERVAL_SEC * 1000,
+          claimGuardUntilMs: Date.now() + CYCLE_INTERVAL_SEC * 1000,
         });
 
         const r = await stepBurn(conn, signer, mint);
