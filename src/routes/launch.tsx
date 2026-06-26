@@ -618,7 +618,10 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
                           placeholder="what's the coin about?"
                         />
                       </Field>
-                      <Field label="Image" full>
+                      <div className="md:col-span-2">
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          Image
+                        </span>
                         <ImageDrop
                           preview={form.imagePreview}
                           onChange={(file, preview) => {
@@ -626,7 +629,8 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
                             update("imagePreview", preview);
                           }}
                         />
-                      </Field>
+                      </div>
+
                     </Section>
 
                     <Section title="Links (optional)">
