@@ -117,6 +117,48 @@ export type WalletTx = {
   success: boolean;
 };
 
+function orderCycleTxs(txs: WalletTx[]): WalletTx[] {
+  const oldestFirst = [...txs].sort((a, b) => {
+    const timeA = a.blockTime ?? 0;
+    const timeB = b.blockTime ?? 0;
+    if (timeA !== timeB) return timeA - timeB;
+    return CYCLE_LABEL_ORDER[a.label] - CYCLE_LABEL_ORDER[b.label];
+  });
+
+  const groups: WalletTx[][] = [];
+  let current: WalletTx[] = [];
+  let expected = 1;
+
+  for (const tx of oldestFirst) {
+    const order = CYCLE_LABEL_ORDER[tx.label];
+    if (order === 1) {
+      if (current.length === 4) groups.push(current);
+      current = [tx];
+      expected = 2;
+      continue;
+    }
+    if (current.length > 0 && order === expected) {
+      current.push(tx);
+      expected += 1;
+      if (current.length === 4) {
+        groups.push(current);
+        current = [];
+        expected = 1;
+      }
+    }
+  }
+
+  // Keep the live in-progress group only when it follows the strict sequence.
+  if (current.length > 0) groups.push(current);
+
+  return groups
+    .sort((a, b) => (b[0]?.blockTime ?? 0) - (a[0]?.blockTime ?? 0))
+    .flatMap((group) =>
+      [...group].sort((a, b) => CYCLE_LABEL_ORDER[a.label] - CYCLE_LABEL_ORDER[b.label]),
+    )
+    .slice(0, 20);
+}
+
 export type StatsPayload = {
   mint: string;
   devWallet: string;
