@@ -439,14 +439,12 @@ function fmtUsd(n: number | null): string {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`;
   return `$${n.toFixed(2)}`;
 }
-function fmtNum(n: number | null, suffix: string): string {
+function fmtNum(n: number | null, _suffix?: string): string {
   if (n == null) return "—";
-  let v: string;
-  if (n >= 1_000_000_000) v = `${(n / 1_000_000_000).toFixed(2)}B`;
-  else if (n >= 1_000_000) v = `${(n / 1_000_000).toFixed(2)}M`;
-  else if (n >= 1_000) v = `${(n / 1_000).toFixed(2)}K`;
-  else v = n.toFixed(2);
-  return `${v} ${suffix}`;
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
+  return n.toFixed(2);
 }
 function short(s: string): string {
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
