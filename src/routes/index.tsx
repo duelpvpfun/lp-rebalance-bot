@@ -13,9 +13,10 @@ const REAL_LAUNCH_CUTOFF = 1782446614;
 const statsQuery = queryOptions({
   queryKey: ["stats"],
   queryFn: () => getStats(),
-  refetchInterval: 6_000,
-  refetchIntervalInBackground: true,
-  staleTime: 3_000,
+  // Cron drives the cycle on our side; visitors just read cached stats.
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  staleTime: 15_000,
 });
 
 export const Route = createFileRoute("/")({
