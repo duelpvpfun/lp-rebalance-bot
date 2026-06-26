@@ -55,11 +55,18 @@ function Index() {
         <nav className="hidden gap-8 text-sm md:flex">
           <a href="#how" className="opacity-80 hover:opacity-100">How it works</a>
           <a href="#activity" className="opacity-80 hover:opacity-100">Live activity</a>
-          <a href="#tokenomics" className="opacity-80 hover:opacity-100">Tokenomics</a>
+          <Link to="/launch" className="opacity-80 hover:opacity-100">Launchpad</Link>
           <a href="#faq" className="opacity-80 hover:opacity-100">FAQ</a>
         </nav>
         <div className="flex items-center gap-2">
           <CommunityIcon />
+          <Link
+            to="/launch"
+            className="hidden items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-foreground shadow-[0_0_20px_-4px_var(--color-accent)] transition hover:scale-105 sm:inline-flex"
+          >
+            <Rocket className="h-4 w-4" />
+            Launch
+          </Link>
           <a
             id="buy"
             href={buyUrl}
