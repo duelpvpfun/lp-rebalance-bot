@@ -315,7 +315,7 @@ const PHASE_LABEL: Record<string, string> = {
   burn: "4/4 · Burning LP tokens (locking liquidity)",
 };
 
-const CYCLE_INTERVAL_SEC = 60;
+const CYCLE_INTERVAL_SEC = 120;
 
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
@@ -323,7 +323,7 @@ function NextCycleTimer() {
   const mounted = useMounted();
   const now = useNow(1000);
 
-  // Source of truth for the countdown: last on-chain dev-wallet tx + 60s.
+  // Source of truth for the countdown: last on-chain dev-wallet tx + interval.
   // Falls back to runtime cooldown row if no tx yet.
   const [lastCycleAt, setLastCycleAt] = useState<number | null>(data.lastCycleAt);
   const [targetMs, setTargetMs] = useState(() =>
@@ -370,20 +370,25 @@ function NextCycleTimer() {
     if (r.ran || r.done) queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
   };
 
+  // Never-die GET poll: status only, no side effect.
   useEffect(() => {
     if (!mounted) return;
+    let stopped = false;
     const poll = async () => {
       try {
         const res = await fetch("/api/public/tick");
         const r = (await res.json()) as TickResponse;
-        applyTick(r);
+        if (!stopped) applyTick(r);
       } catch {
         /* keep state */
       }
     };
     void poll();
     const id = setInterval(() => void poll(), 3_000);
-    return () => clearInterval(id);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
   }, [mounted, queryClient]);
 
   const remaining = Math.max(0, Math.floor((targetMs - now) / 1000));
@@ -394,14 +399,17 @@ function NextCycleTimer() {
   const phaseLabel = running ? PHASE_LABEL[phase] ?? phase : null;
   const firing = mounted && !running && remaining === 0;
 
+  // Single-shot POST when countdown hits 0. Heavy throttle + ref guard prevents
+  // duplicate fires; backend has its own DB-level lock as the final guarantee.
   useEffect(() => {
     if (!mounted) return;
-    if (phase === "idle" && remaining > 0) return;
-    if (Date.now() - lastPostAtRef.current < 2_500) return;
+    if (phase !== "idle") return; // never POST while a cycle is mid-flight
+    if (remaining > 0) return;
+    if (Date.now() - lastPostAtRef.current < 5_000) return;
+    if (postingRef.current) return;
 
     let cancelled = false;
     const advance = async () => {
-      if (postingRef.current) return;
       postingRef.current = true;
       lastPostAtRef.current = Date.now();
       try {
@@ -412,7 +420,7 @@ function NextCycleTimer() {
         const r = (await res.json()) as TickResponse;
         if (!cancelled) applyTick(r);
       } catch {
-        /* keep countdown/status */
+        /* keep countdown/status — next 3s poll will resync */
       } finally {
         postingRef.current = false;
       }
@@ -424,29 +432,32 @@ function NextCycleTimer() {
   }, [mounted, phase, remaining]);
 
   return (
-    <div className="rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur min-w-[260px]">
+    <div className="flex min-h-[132px] min-w-[280px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur">
       <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
         {(running || firing) && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
         {running ? "Cycle running" : firing ? "Firing now…" : "Next cycle in"}
       </div>
-      {running ? (
-        <div className="mt-1 text-center" suppressHydrationWarning>
-          <div className="font-display text-base text-accent">{phaseLabel}</div>
-          <div className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">
-            confirming · {elapsed}s
+      <div className="flex h-[56px] items-center justify-center" suppressHydrationWarning>
+        {running ? (
+          <div className="text-center">
+            <div className="font-display text-base leading-tight text-accent">{phaseLabel}</div>
+            <div className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+              confirming · {elapsed}s
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="mt-1 text-center font-display text-4xl tabular-nums text-accent" suppressHydrationWarning>
-          {mounted ? `${mm}:${ss}` : "--:--"}
-        </div>
-      )}
-      <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-        Claim → Swap → LP → Burn · every {CYCLE_INTERVAL_SEC}s
+        ) : (
+          <div className="font-display text-4xl tabular-nums text-accent">
+            {mounted ? `${mm}:${ss}` : "--:--"}
+          </div>
+        )}
+      </div>
+      <div className="text-center text-[10px] uppercase tracking-widest text-muted-foreground">
+        Claim → Swap → LP → Burn · every {Math.round(CYCLE_INTERVAL_SEC / 60)} min
       </div>
     </div>
   );
 }
+
 
 
 
