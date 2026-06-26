@@ -311,3 +311,37 @@ function Stat({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+function relTime(iso?: string | null): string {
+  if (!iso) return "just now";
+  const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
+}
+
+function ClaimStatusBanner({ coin }: { coin: Coin }) {
+  const status = coin.claim_status;
+  if (!status) return null;
+  if (status === "claiming") {
+    return (
+      <div className="mt-4 rounded-md border border-accent/60 bg-accent/10 px-4 py-3 text-sm text-accent">
+        ⚡ Threshold reached — running buyback → LP → burn cycle.
+      </div>
+    );
+  }
+  const amt = Number(coin.claimable_usdc ?? 0);
+  return (
+    <div className="mt-4 rounded-md border border-border bg-card/40 px-4 py-3 text-sm">
+      <div className="font-medium text-foreground">
+        ⏳ Accumulating rewards — ${amt.toFixed(2)} / $5.00
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        The bot runs a buyback + LP cycle once creator rewards reach $5.
+        {coin.claim_checked_at ? ` Last checked ${relTime(coin.claim_checked_at)}.` : ""}
+      </div>
+    </div>
+  );
+}
