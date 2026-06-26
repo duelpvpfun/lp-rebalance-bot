@@ -290,62 +290,89 @@ function useMounted() {
   return m;
 }
 
+type TickResponse = {
+  ran?: boolean;
+  ok?: boolean;
+  done?: boolean;
+  phase?: "claim" | "buy" | "lp" | "burn";
+  nextPhase?: "claim" | "buy" | "lp" | "burn" | "idle";
+  reason?: "cooldown" | "in_flight";
+  secondsUntilNext?: number;
+};
+
+const PHASE_LABEL: Record<string, string> = {
+  claim: "CLAIMING",
+  buy: "BUYING",
+  lp: "ADDING LP",
+  burn: "BURNING LP",
+};
+
 function NextCycleTimer() {
   const { data } = useSuspenseQuery(statsQuery);
   const queryClient = useQueryClient();
   const mounted = useMounted();
   const now = useNow(1000);
-  const interval = data.cycleIntervalSec * 1000;
   const inFlightRef = useRef(false);
-  const [isFiring, setIsFiring] = useState(false);
-  const [nextAt, setNextAt] = useState(() => computeNextCycleAt(data.lastCycleAt, interval, Date.now()));
+  // Server is the source of truth for the countdown; we just display.
+  const [nextAt, setNextAt] = useState(() => Date.now() + data.cycleIntervalSec * 1000);
+  const [activePhase, setActivePhase] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!inFlightRef.current) {
-      setNextAt(computeNextCycleAt(data.lastCycleAt, interval, Date.now()));
-    }
-  }, [data.lastCycleAt, interval]);
+    if (!mounted) return;
+    const poll = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      try {
+        const res = await fetch("/api/public/tick", { method: "POST" });
+        const result = (await res.json()) as TickResponse;
+        const secs = typeof result.secondsUntilNext === "number" ? result.secondsUntilNext : 5;
 
-  useEffect(() => {
-    if (!mounted || now < nextAt || inFlightRef.current) return;
-    inFlightRef.current = true;
-    setIsFiring(true);
-    fetch("/api/public/tick", { method: "POST" })
-      .then((res) => res.json() as Promise<{ ran?: boolean; secondsUntilNext?: number }>)
-      .then((result) => {
-        const secondsUntilNext = typeof result.secondsUntilNext === "number"
-          ? result.secondsUntilNext
-          : data.cycleIntervalSec;
-        setNextAt(Date.now() + Math.max(1, secondsUntilNext) * 1000);
         if (result.ran) {
+          // A step executed. If the cycle is done (burn confirmed), reset the
+          // full countdown. Otherwise stay in "active" mode and tick again soon.
+          if (result.done) {
+            setActivePhase(null);
+            setNextAt(Date.now() + Math.max(1, secs) * 1000);
+          } else {
+            setActivePhase(result.nextPhase && result.nextPhase !== "idle" ? result.nextPhase : null);
+            setNextAt(Date.now() + Math.max(1, secs) * 1000);
+          }
           queryClient.invalidateQueries({ queryKey: statsQuery.queryKey });
+        } else if (result.reason === "cooldown") {
+          setActivePhase(null);
+          setNextAt(Date.now() + Math.max(1, secs) * 1000);
+        } else if (result.reason === "in_flight") {
+          // Another tick is mid-step; check back shortly.
+          setNextAt(Date.now() + 3_000);
         }
-      })
-      .catch(() => setNextAt(Date.now() + 5_000))
-      .finally(() => {
+      } catch {
+        setNextAt(Date.now() + 5_000);
+      } finally {
         inFlightRef.current = false;
-        setIsFiring(false);
-      });
-  }, [data.cycleIntervalSec, mounted, nextAt, now, queryClient]);
+      }
+    };
+    // Kick once on mount, then poll every 5s so step machine progresses.
+    void poll();
+    const id = setInterval(() => void poll(), 5_000);
+    return () => clearInterval(id);
+  }, [mounted, queryClient]);
 
   const remaining = Math.max(0, Math.floor((nextAt - now) / 1000));
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
+  const display = activePhase ? PHASE_LABEL[activePhase] ?? activePhase.toUpperCase() : `${mm}:${ss}`;
   return (
     <div className="rounded-2xl border border-border bg-card/60 px-5 py-3 text-center backdrop-blur">
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Next cycle in</div>
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+        {activePhase ? "Cycle step" : "Next cycle in"}
+      </div>
       <div className="font-display text-3xl tabular-nums text-accent" suppressHydrationWarning>
-        {mounted ? (isFiring ? "FIRING" : `${mm}:${ss}`) : "--:--"}
+        {mounted ? display : "--:--"}
       </div>
     </div>
   );
 }
 
-function computeNextCycleAt(lastCycleAtSec: number | null, intervalMs: number, nowMs: number) {
-  if (!lastCycleAtSec) return nowMs;
-  const nextAt = lastCycleAtSec * 1000 + intervalMs;
-  return nextAt <= nowMs ? nowMs : nextAt;
-}
 
 function TxList() {
   const { data } = useSuspenseQuery(statsQuery);
