@@ -140,7 +140,7 @@ function Index() {
             { n: "01", t: "Collect the rent", d: "The dev wallet auto-claims creator fees from pump.fun. These arrive as real USDC (dollars)." },
             { n: "02", t: "Buy some $LIQUITITTY", d: "35% of that USDC is used to market-buy $LIQUITITTY on PumpSwap. Yes, that nudges the price up — that's the point." },
             { n: "03", t: "Pair them up", d: "Now the wallet holds fresh $LIQUITITTY and the remaining USDC. The bot checks the current pool ratio so the two sides match." },
-            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 1 minute ago. Repeat forever." },
+            { n: "04", t: "Refill the pool", d: "Both bags go straight back into the PumpSwap liquidity pool. The pool is bigger than it was 2 minutes ago. Repeat forever." },
           ].map((s) => (
             <div key={s.n} className="rounded-2xl border border-border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-1 hover:bg-card">
               <div className="font-display text-3xl text-accent">{s.n}</div>
