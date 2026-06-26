@@ -372,5 +372,3 @@ function formatTime(t: number | null): string {
   return new Date(t * 1000).toLocaleDateString();
 }
 
-// keep type import side-effect-free
-export type _StatsPayload = StatsPayload;
