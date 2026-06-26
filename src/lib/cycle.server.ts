@@ -465,6 +465,7 @@ type CycleState = {
   claimedUsdc: number;
   spotPrice: number;
   attempts: number;
+  leaseOwner?: string;
 };
 
 function isPhase(value: unknown): value is Phase {
@@ -492,6 +493,7 @@ function rowToCycleState(raw: unknown): CycleState {
     claimedUsdc: Number(row.claimed_usdc ?? 0),
     spotPrice: Number(row.spot_price ?? 0),
     attempts: Number(row.attempts ?? 0),
+    leaseOwner: typeof row.lease_owner === "string" ? row.lease_owner : undefined,
   };
 }
 
@@ -552,6 +554,24 @@ async function acquireCycleLease(owner: string): Promise<CycleState | null> {
   // Guard against an all-NULL composite row (no id) => not acquired.
   if (!row || (row as { id?: unknown }).id == null) return null;
   return rowToCycleState(row);
+}
+
+async function reserveClaimProgress(
+  owner: string,
+  claimedUsdc: number,
+  spotPrice: number,
+): Promise<boolean> {
+  const db = await cycleDb();
+  const { data, error } = await db.rpc("reserve_cycle_claim", {
+    p_id: STATE_ID,
+    p_owner: owner,
+    p_guard_seconds: CYCLE_INTERVAL_SEC,
+    p_claimed_usdc: claimedUsdc,
+    p_spot_price: spotPrice,
+  });
+  if (error) throw new Error(`claim reserve failed: ${error.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  return !!row && (row as { id?: unknown }).id != null;
 }
 
 async function persistCycleState(state: CycleState): Promise<void> {
@@ -1093,9 +1113,21 @@ async function runCycleStep(state?: CycleState): Promise<{
           // spam-claiming the vault and shrinking the eventual buy basis.
           broadcastClaimedUsdc = expectedClaimedUsdc;
           broadcastSpotPrice = spotPriceUsdcPerToken;
+          const reserved = await reserveClaimProgress(
+            inputState.leaseOwner ?? "",
+            expectedClaimedUsdc,
+            spotPriceUsdcPerToken,
+          );
+          if (!reserved) {
+            throw new Error("claim already reserved by another runner — blocking duplicate claim tx");
+          }
           claimProgressSaved = true;
           const claimGuardCooldown = Date.now() + CYCLE_INTERVAL_SEC * 1000;
           nextState.cooldownUntilMs = claimGuardCooldown;
+          nextState.phase = "buy";
+          nextState.claimedUsdc = expectedClaimedUsdc;
+          nextState.spotPrice = spotPriceUsdcPerToken;
+          nextState.attempts = 0;
           await persistCycleProgress({
             ...nextState,
             phase: "buy",
@@ -1419,6 +1451,22 @@ export async function tick(): Promise<TickResult> {
         secondsUntilNext: Math.max(1, Math.ceil((chainCooldown.cooldownUntilMs - now) / 1000)),
       };
     }
+
+    // If a previous worker died while still showing `claim`, never reclaim the
+    // vault after the lease expires. Treat it as an ended/failed cycle and wait
+    // for the next clean 60s boundary. Duplicate claim txs are worse than a
+    // skipped minute.
+    if (leasedState.cycleStartMs > 0 && now - leasedState.cycleStartMs > 10_000) {
+      const reset = abortCycleState();
+      await persistCycleState(reset);
+      lastKnownPhase = "idle";
+      return {
+        ran: false,
+        reason: "cooldown",
+        phase: "idle",
+        secondsUntilNext: Math.max(1, Math.ceil((reset.cooldownUntilMs - now) / 1000)),
+      };
+    }
   }
 
   if (!atStartOfCycle && now - leasedState.cycleStartMs > STALE_CYCLE_MS) {
@@ -1432,17 +1480,6 @@ export async function tick(): Promise<TickResult> {
       secondsUntilNext: Math.ceil((reset.cooldownUntilMs - now) / 1000),
     };
   }
-  if (atStartOfCycle && now < leasedState.cooldownUntilMs) {
-    await persistCycleState(leasedState);
-    lastKnownPhase = "idle";
-    return {
-      ran: false,
-      reason: "cooldown",
-      phase: "idle",
-      secondsUntilNext: Math.ceil((leasedState.cooldownUntilMs - now) / 1000),
-    };
-  }
-
   lastKnownPhase = leasedState.phase;
   inFlight = runCycleStep(leasedState);
   try {
