@@ -2,7 +2,7 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "node:path";
 import fs from "node:fs";
-import { perEnvironmentPlugin, type Plugin } from "vite";
+import type { Plugin } from "vite";
 
 // Some @solana/* v2 packages only declare `browser`/`node` export conditions
 // (no `workerd`/`default`), and the workerd build can't pick a file. The v6
@@ -61,13 +61,10 @@ function solanaServerAliasPlugin(): Plugin {
 }
 
 function browserNodePolyfills(): Plugin {
-  return perEnvironmentPlugin("browser-node-polyfills", (environment) => {
-    if (environment.name !== "client") return false;
-    return nodePolyfills({
-      include: ["buffer", "process"],
-      globals: { Buffer: true, global: true, process: true },
-      protocolImports: true,
-    });
+  return nodePolyfills({
+    include: ["buffer", "process"],
+    globals: { Buffer: true, global: true, process: true },
+    protocolImports: false,
   });
 }
 
