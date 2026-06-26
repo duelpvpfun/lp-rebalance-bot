@@ -160,7 +160,7 @@ function CoinsPage() {
                         className="block h-full w-full"
                         loading="lazy"
                       />
-                      <div aria-hidden className="pointer-events-none absolute left-0 top-0 h-7 w-32 bg-card" />
+                      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-black" />
                     </div>
                   </div>
 
