@@ -193,7 +193,7 @@ export const getStats = createServerFn({ method: "GET" }).handler(async (): Prom
   if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
   const devWallet = loadPubkey();
   const conn = new Connection(rpcUrl(), "confirmed");
-  const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet)]);
+  const [dex, txs] = await Promise.all([fetchDex(mint), fetchTxs(conn, devWallet, mint)]);
   const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
   return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 300 };
 });
