@@ -85,10 +85,12 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [
-      solanaServerAliasPlugin(),
-      ...browserNodePolyfills(),
-    ],
+    plugins: [solanaServerAliasPlugin()],
+    environments: {
+      client: {
+        plugins: browserNodePolyfills(),
+      },
+    },
     define: {
       global: "globalThis",
     },
