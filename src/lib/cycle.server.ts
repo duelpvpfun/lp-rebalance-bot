@@ -690,8 +690,12 @@ async function stepClaim(
         ok: true,
         info: { usdc: claimableUsdc, vault: creatorVaultUsdcAta.toBase58() },
       });
-      if (claimableUsdc < 0.000001) {
-        out.push({ step: "skip", ok: true, info: "no USDC creator rewards in bonding-curve vault" });
+      if (claimableUsdc < 0.5) {
+        out.push({
+          step: "skip",
+          ok: true,
+          info: `bonding-curve vault below 0.5 USDC (${claimableUsdc}); skipping cycle to avoid dust spam`,
+        });
         return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
       }
       const onlinePumpSdk = new OnlinePumpSdk(conn);
@@ -748,8 +752,12 @@ async function stepClaim(
         ok: true,
         info: { usdc: vaultUsdc, vault: coinCreatorVaultAta.toBase58() },
       });
-      if (vaultUsdc < 0.000001) {
-        out.push({ step: "skip", ok: true, info: "no USDC creator rewards in PumpSwap vault" });
+      if (vaultUsdc < 0.5) {
+        out.push({
+          step: "skip",
+          ok: true,
+          info: `PumpSwap vault below 0.5 USDC (${vaultUsdc}); skipping cycle to avoid dust spam`,
+        });
         return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
       }
       const [coinCreatorVaultAtaAccountInfo, coinCreatorTokenAccountInfo] =

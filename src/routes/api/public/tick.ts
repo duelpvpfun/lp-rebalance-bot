@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { readCycleStatus, tick } from "@/lib/cycle.server";
+import { readCycleStatus } from "@/lib/cycle.server";
 
 /**
- * Cycle endpoint.
- * GET is status-only for the website timer.
- * POST is secret-protected and can advance exactly one cycle step.
+ * Status-only endpoint for the website timer.
+ *
+ * tick() is NEVER triggered from here — neither GET nor POST. The cycle is
+ * driven exclusively by the in-process scheduler started in src/start.ts.
+ * This prevents website visitors (or external pings) from spamming claims/buys.
  */
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -12,45 +14,24 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-cron-secret",
 };
 
-function isAuthorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!secret) return false;
-  const auth = request.headers.get("authorization") ?? "";
-  const cronSecret = request.headers.get("x-cron-secret") ?? "";
-  const apikey = request.headers.get("apikey") ?? "";
-  return auth === `Bearer ${secret}` || cronSecret === secret || (!!publishableKey && apikey === publishableKey);
+async function status() {
+  try {
+    const result = await readCycleStatus();
+    return Response.json(result, { headers: CORS });
+  } catch (e) {
+    return Response.json(
+      { ran: false, error: (e as Error).message },
+      { status: 500, headers: CORS },
+    );
+  }
 }
 
 export const Route = createFileRoute("/api/public/tick")({
   server: {
     handlers: {
       OPTIONS: async () => new Response(null, { status: 204, headers: CORS }),
-      GET: async () => {
-        try {
-          const result = await readCycleStatus();
-          return Response.json(result, { headers: CORS });
-        } catch (e) {
-          return Response.json(
-            { ran: false, error: (e as Error).message },
-            { status: 500, headers: CORS },
-          );
-        }
-      },
-      POST: async ({ request }) => {
-        if (!isAuthorized(request)) {
-          return Response.json({ ran: false, error: "Unauthorized" }, { status: 401, headers: CORS });
-        }
-        try {
-          const result = await tick();
-          return Response.json(result, { headers: CORS });
-        } catch (e) {
-          return Response.json(
-            { ran: false, error: (e as Error).message },
-            { status: 500, headers: CORS },
-          );
-        }
-      },
+      GET: async () => status(),
+      POST: async () => status(),
     },
   },
 });
