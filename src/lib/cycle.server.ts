@@ -348,7 +348,7 @@ async function addToOwnPool(
         return true;
       } catch (e) {
         lastErr = (e as Error).message;
-        if (lastErr.includes("did not confirm")) {
+        if (lastErr.includes("did not confirm") || lastErr.includes("broadcast but progress save failed")) {
           steps.push({
             step: "addLiquidity_confirmation_unknown",
             ok: true,
