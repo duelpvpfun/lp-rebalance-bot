@@ -84,5 +84,8 @@ export default defineConfig({
         /^@solana\/(?!buffer-layout)/,
       ],
     },
+    optimizeDeps: {
+      include: ["buffer"],
+    },
   },
 });

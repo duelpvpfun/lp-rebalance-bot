@@ -259,9 +259,6 @@ function CommunityIcon() {
 function StatsBar() {
   const { data } = useSuspenseQuery(statsQuery);
   const d = data.dex;
-  const mounted = useMounted();
-  // Render skeleton until client mount so live external numbers don't cause a hydration mismatch.
-  if (!mounted) return <StatsBarSkeleton />;
   return (
     <section className="mx-auto max-w-6xl px-6">
       <div className="grid gap-4 md:grid-cols-4">
@@ -271,7 +268,7 @@ function StatsBar() {
         <LiveBlock label="$LIQUITITTY in LP" value={fmtNum(d.liquidityToken)} />
       </div>
       <div className="mt-2 text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-        Live · refreshes every 6s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}
+        Live · refreshes every 60s · price ${d.priceUsd?.toFixed(8) ?? "—"} ·{" "}
         {d.pairUrl ? (
           <a className="underline" target="_blank" rel="noreferrer" href={d.pairUrl}>chart</a>
         ) : ("no pair yet")}
@@ -400,9 +397,6 @@ function NextCycleTimer() {
 
 function TxList() {
   const { data } = useSuspenseQuery(statsQuery);
-  const mounted = useMounted();
-  if (!mounted) return <TxListSkeleton />;
-
   return (
     <div className="mt-8 overflow-hidden rounded-2xl border border-border bg-card/40 backdrop-blur">
       <div className="flex items-center justify-between border-b border-border/60 px-5 py-3 text-xs uppercase tracking-widest text-muted-foreground">

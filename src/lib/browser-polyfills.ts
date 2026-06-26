@@ -1,9 +1,3 @@
-import bufferModule from "buffer";
-
-const Buffer = (bufferModule as { Buffer?: typeof globalThis.Buffer }).Buffer;
-
-const globalScope = globalThis as any;
-
-if (!globalScope.Buffer && Buffer) {
-  globalScope.Buffer = Buffer;
-}
+// Keep this file lightweight during SSR. Solana browser dependencies are loaded
+// lazily through `solana-client.ts`, which installs Buffer before importing them.
+export {};
