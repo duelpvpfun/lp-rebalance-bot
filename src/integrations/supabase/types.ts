@@ -71,12 +71,12 @@ export type Database = {
           phase: string
           spot_price: number
           updated_at: string
-        }
+        }[]
         SetofOptions: {
           from: "*"
           to: "cycle_runtime_state"
-          isOneToOne: true
-          isSetofReturn: false
+          isOneToOne: false
+          isSetofReturn: true
         }
       }
     }
