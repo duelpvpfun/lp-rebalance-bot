@@ -107,6 +107,13 @@ function Index() {
             >
               Buy →
             </a>
+            <Link
+              to="/launch"
+              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-accent to-accent/70 px-6 py-3 font-bold text-accent-foreground shadow-[0_0_28px_-4px_var(--color-accent)] ring-2 ring-accent/40 transition hover:scale-105"
+            >
+              <Rocket className="h-4 w-4" />
+              Launch a coin
+            </Link>
             <a
               href={COMMUNITY_URL}
               target="_blank"
