@@ -79,6 +79,33 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      reserve_cycle_claim: {
+        Args: {
+          p_claimed_usdc: number
+          p_guard_seconds: number
+          p_id: string
+          p_owner: string
+          p_spot_price: number
+        }
+        Returns: {
+          attempts: number
+          claimed_usdc: number
+          cooldown_until: string
+          cycle_start_at: string | null
+          id: string
+          lease_expires_at: string | null
+          lease_owner: string | null
+          phase: string
+          spot_price: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "cycle_runtime_state"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
     }
     Enums: {
       [_ in never]: never
