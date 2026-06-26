@@ -1309,9 +1309,20 @@ async function fetchAmmSpotPrice(conn: Connection, mint: string): Promise<number
 }
 
 /* ============================================================================
- * TICK — public status entry. Read-only: it never runs a step or signs a tx.
- * The website can poll this as fast as it wants without causing claim/buy spam.
+ * TICK — one-step public entry. GET status routes never call this. The website
+ * only POSTs when the server-reported timer hits zero or a cycle is already in
+ * progress, so a full cycle advances claim → buy → LP → burn without one long
+ * request and without random read-only polls signing transactions.
  * ========================================================================== */
+
+let inFlight: Promise<{
+  ok: boolean;
+  phase: Phase;
+  done: boolean;
+  steps: StepResult[];
+  state: CycleState;
+}> | null = null;
+let lastKnownPhase: Phase | "idle" = "idle";
 
 export type TickResult =
   | {
@@ -1342,12 +1353,7 @@ export async function cycleStatus(): Promise<TickStatus> {
   const conn = new Connection(rpcUrl(), "confirmed");
   const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
   const lastCycleAt = typeof lastSigSec === "number" ? lastSigSec : null;
-  const secondsUntilNext =
-    lastSigSec === "error"
-      ? CYCLE_INTERVAL_SEC
-      : typeof lastSigSec === "number"
-        ? Math.max(0, lastSigSec + CYCLE_INTERVAL_SEC - Math.floor(now / 1000))
-        : 0;
+  const secondsUntilNext = Math.max(0, Math.ceil((state.cooldownUntilMs - now) / 1000));
 
   if (active) {
     return { ran: false, reason: "in_flight", phase: state.phase, secondsUntilNext, lastCycleAt };
@@ -1363,5 +1369,80 @@ export async function tick(): Promise<TickResult> {
   if (process.env.BOT_ENABLED !== "true") {
     return { ok: false, ran: false, reason: "disabled", steps: [], phase: "idle", secondsUntilNext: 0 } as any;
   }
-  return cycleStatus() as Promise<TickResult>;
+  const now = Date.now();
+  if (inFlight) {
+    return { ran: false, reason: "in_flight", phase: lastKnownPhase, secondsUntilNext: 3, lastCycleAt: null };
+  }
+
+  const owner = `${now}-${Math.random().toString(36).slice(2)}`;
+  let leasedState = await acquireCycleLease(owner);
+  if (!leasedState) {
+    const locked = (await readCycleState()) ?? (await ensureCycleStateRow());
+    lastKnownPhase = locked.cycleStartMs > 0 ? locked.phase : "idle";
+    const secondsUntilNext = Math.max(0, Math.ceil((locked.cooldownUntilMs - now) / 1000));
+    return { ran: false, reason: locked.cycleStartMs > 0 ? "in_flight" : "cooldown", phase: lastKnownPhase, secondsUntilNext };
+  }
+
+  const atStartOfCycle = leasedState.cycleStartMs === 0;
+
+  if (atStartOfCycle) {
+    const signer = loadKeypair();
+    const conn = new Connection(rpcUrl(), "confirmed");
+    const chainCooldown = await walletCooldownState(conn, signer.publicKey, now);
+    if (chainCooldown) {
+      await persistCycleState(chainCooldown);
+      lastKnownPhase = "idle";
+      return {
+        ran: false,
+        reason: "cooldown",
+        phase: "idle",
+        secondsUntilNext: Math.max(1, Math.ceil((chainCooldown.cooldownUntilMs - now) / 1000)),
+      };
+    }
+  }
+
+  if (!atStartOfCycle && now - leasedState.cycleStartMs > STALE_CYCLE_MS) {
+    const reset = abortCycleState();
+    await persistCycleState(reset);
+    lastKnownPhase = "idle";
+    return {
+      ran: false,
+      reason: "cooldown",
+      phase: "idle",
+      secondsUntilNext: Math.ceil((reset.cooldownUntilMs - now) / 1000),
+    };
+  }
+  if (atStartOfCycle && now < leasedState.cooldownUntilMs) {
+    await persistCycleState(leasedState);
+    lastKnownPhase = "idle";
+    return {
+      ran: false,
+      reason: "cooldown",
+      phase: "idle",
+      secondsUntilNext: Math.ceil((leasedState.cooldownUntilMs - now) / 1000),
+    };
+  }
+
+  lastKnownPhase = leasedState.phase;
+  inFlight = runCycleStep(leasedState);
+  try {
+    const r = await inFlight;
+    await persistCycleState(r.state);
+    const nextPhase: Phase | "idle" = r.done ? "idle" : r.state.phase;
+    lastKnownPhase = nextPhase;
+    const secondsUntilNext = r.done
+      ? Math.max(1, Math.ceil((r.state.cooldownUntilMs - Date.now()) / 1000))
+      : 0;
+    return {
+      ran: true,
+      ok: r.ok,
+      phase: r.phase,
+      done: r.done,
+      nextPhase,
+      steps: r.steps,
+      secondsUntilNext,
+    };
+  } finally {
+    inFlight = null;
+  }
 }
