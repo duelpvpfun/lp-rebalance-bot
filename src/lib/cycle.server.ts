@@ -1252,7 +1252,11 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   const signer = loadKeypair();
   const conn = new Connection(rpcUrl(), "confirmed");
   const gated = await hardStartGate(conn, signer);
-  if (gated) return { ok: true, steps: [gated.step] };
+  if (gated) {
+    await ensureCycleStateRow();
+    await persistCycleState(gated.state);
+    return { ok: true, steps: [gated.step] };
+  }
 
   await ensureCycleStateRow();
   const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
