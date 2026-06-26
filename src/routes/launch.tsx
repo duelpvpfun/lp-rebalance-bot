@@ -568,17 +568,7 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
 
-      setFundSig(sig);
-      toast.success("Funding tx sent");
-      await connection.confirmTransaction(sig, "confirmed");
-      setPhase("polling");
-      pollStatus(prepare.pendingId);
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err?.message ?? "Sign/send failed");
-      setPhase("error");
-    }
-  }
+
 
 
   async function pollStatus(pendingId: string) {
