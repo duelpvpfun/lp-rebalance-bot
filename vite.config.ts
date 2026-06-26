@@ -60,20 +60,31 @@ function solanaServerAliasPlugin(): Plugin {
 }
 
 const sharedAlias = {
-  buffer: path.resolve(__dirname, "node_modules/buffer/index.js"),
-  "buffer/": path.resolve(__dirname, "node_modules/buffer/index.js"),
   "rpc-websockets/dist/lib/client": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets/dist/lib/client/websocket.browser": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "rpc-websockets": path.resolve(__dirname, "src/lib/rpc-websockets-stub.ts"),
   "@coral-xyz/anchor": path.resolve(__dirname, "src/lib/anchor-shim.ts"),
 };
 
+function browserBufferAliasPlugin(): Plugin {
+  const bufferEntry = path.resolve(__dirname, "node_modules/buffer/index.js");
+  return {
+    name: "browser-buffer-alias",
+    enforce: "pre",
+    resolveId(source) {
+      if (this.environment?.name !== "client") return null;
+      if (source === "buffer" || source === "buffer/") return bufferEntry;
+      return null;
+    },
+  };
+}
+
 export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
   vite: {
-    plugins: [solanaServerAliasPlugin()],
+    plugins: [browserBufferAliasPlugin(), solanaServerAliasPlugin()],
     resolve: {
       alias: { ...sharedAlias },
     },
