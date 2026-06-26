@@ -148,9 +148,6 @@ function orderCycleTxs(txs: WalletTx[]): WalletTx[] {
     }
   }
 
-  // Keep the live in-progress group only when it follows the strict sequence.
-  if (current.length > 0) groups.push(current);
-
   return groups
     .sort((a, b) => (b[0]?.blockTime ?? 0) - (a[0]?.blockTime ?? 0))
     .flatMap((group) =>
