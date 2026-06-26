@@ -1,8 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Users, Rocket, Search, ArrowLeft, Upload, X, Info, Loader2, Sparkles } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Users, Rocket, Search, ArrowLeft, Upload, X, Info, Loader2, Sparkles, Lock } from "lucide-react";
 import { toast } from "sonner";
 import logo from "@/assets/liquititty-logo.webp";
+import { getStats } from "@/lib/stats.functions";
+
 import {
   Dialog,
   DialogContent,
@@ -43,6 +46,13 @@ function LaunchPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"bump" | "new" | "mcap">("bump");
+  const { data: stats } = useQuery({
+    queryKey: ["stats"],
+    queryFn: () => getStats(),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
 
   // Demo king card so the layout matches the airlaunch terminal even before
   // the first real launch lands. Clicking it opens the create dialog.
@@ -60,7 +70,7 @@ function LaunchPage() {
             <nav className="hidden flex-wrap items-center gap-x-3 gap-y-1 md:flex">
               <Link to="/" className="pf-link">home</Link>
               <a href={COMMUNITY_URL} target="_blank" rel="noreferrer" className="pf-link">community</a>
-              <a href="/#activity" className="pf-link">live activity</a>
+              
               <button type="button" onClick={() => setHowOpen(true)} className="pf-link cursor-pointer">how it works</button>
             </nav>
           </div>
@@ -110,35 +120,55 @@ function LaunchPage() {
             👑 king of the hill
           </div>
           <div className="pf-king-aura">
-            <button
-              type="button"
-              onClick={openCreate}
+            <a
+              href={stats?.dex?.pairUrl ?? "#"}
+              target="_blank"
+              rel="noreferrer"
               className="pf-card group flex items-start gap-3 rounded-md p-2.5 text-left"
             >
               <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
-                <img src={logo} alt="" className="h-full w-full object-cover" />
+                <img src={logo} alt="liquititty" className="h-full w-full object-cover" />
               </div>
               <div className="text-xs leading-relaxed">
                 <div className="mb-1 inline-block rounded-sm bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">
-                  example · launch yours
+                  official · auto-LP live
                 </div>
                 <div className="text-muted-foreground">
-                  Created by <span className="font-semibold text-accent">YOU</span>
+                  market cap:{" "}
+                  <span className="font-bold text-accent">
+                    {fmtUsd(stats?.dex?.marketCapUsd)}
+                  </span>
                 </div>
                 <div className="text-muted-foreground">
-                  auto-LP cycle: <span className="font-bold text-foreground">every 3 min</span>
+                  liquidity:{" "}
+                  <span className="font-bold text-foreground">
+                    {fmtUsd(stats?.dex?.liquidityUsd)}
+                  </span>
                 </div>
                 <div className="text-muted-foreground">
-                  burns LP: <span className="font-bold text-accent">forever</span> 🔒
+                  in LP:{" "}
+                  <span className="text-foreground">
+                    {fmtNum(stats?.dex?.liquidityUsdc)} USDC
+                  </span>{" "}
+                  ·{" "}
+                  <span className="text-foreground">
+                    {fmtNum(stats?.dex?.liquidityToken)} $LIQUITITTY
+                  </span>
                 </div>
                 <div className="mt-1 text-sm font-bold text-foreground group-hover:text-accent">
-                  Your Coin Here{" "}
-                  <span className="font-normal text-muted-foreground">(ticker: $TICKER)</span>
+                  Liquititty{" "}
+                  <span className="font-normal text-muted-foreground">(ticker: $LIQUITITTY)</span>
                 </div>
+                {stats?.mint && (
+                  <div className="mt-1 font-mono text-[10px] text-muted-foreground/80">
+                    CA: {stats.mint.slice(0, 6)}…{stats.mint.slice(-6)}
+                  </div>
+                )}
               </div>
-            </button>
+            </a>
           </div>
         </section>
+
 
         {/* SEARCH */}
         <div className="mx-auto mt-10 flex max-w-2xl items-center gap-2">
@@ -210,6 +240,19 @@ function LaunchPage() {
       <CreateCoinDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
+}
+
+function fmtNum(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  if (a >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `${(n / 1e3).toFixed(2)}K`;
+  if (a >= 1) return n.toFixed(2);
+  return n.toPrecision(3);
+}
+function fmtUsd(n: number | null | undefined) {
+  return n == null || !Number.isFinite(n) ? "—" : `$${fmtNum(n)}`;
 }
 
 function SortPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
@@ -476,55 +519,23 @@ function CreateCoinDialog({ open, onClose }: { open: boolean; onClose: () => voi
             ) : (
               <>
                 <Section title="Auto-LP rules">
-                  <Field
-                    label="Buyback %"
-                    hint="Share of remaining USDC swapped back into your token before redepositing LP. 35% keeps LP perfectly paired."
-                  >
-                    <NumberSuffix
-                      value={form.buyback_pct}
-                      onChange={(v) => update("buyback_pct", v)}
-                      suffix="%"
-                      min={5}
-                      max={95}
-                    />
+                  <div className="md:col-span-2 mb-1 flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[11px] text-accent">
+                    <Lock className="h-3 w-3" /> these defaults are locked while the launchpad is in beta — every coin runs the exact same loop.
+                  </div>
+                  <Field label="Buyback %" hint="Locked at 35% during beta — keeps LP perfectly paired.">
+                    <NumberSuffix value={form.buyback_pct} onChange={() => {}} suffix="%" disabled />
                   </Field>
-                  <Field
-                    label="Treasury fee %"
-                    hint="Cut taken off the claimed USDC every cycle, sent to the Liquititty treasury."
-                  >
-                    <NumberSuffix
-                      value={form.treasury_fee_pct}
-                      onChange={(v) => update("treasury_fee_pct", v)}
-                      suffix="%"
-                      min={0}
-                      max={50}
-                    />
+                  <Field label="Treasury fee %" hint="Locked at 10% during beta — funds the platform.">
+                    <NumberSuffix value={form.treasury_fee_pct} onChange={() => {}} suffix="%" disabled />
                   </Field>
-                  <Field
-                    label="Cycle interval"
-                    hint="How often the bot fires: claim → buy → LP → burn. Default 180s (3 min)."
-                  >
-                    <NumberSuffix
-                      value={form.cycle_interval_seconds}
-                      onChange={(v) => update("cycle_interval_seconds", v)}
-                      suffix="s"
-                      min={60}
-                      step={30}
-                    />
+                  <Field label="Cycle interval" hint="Locked at 180s (3 min) during beta.">
+                    <NumberSuffix value={form.cycle_interval_seconds} onChange={() => {}} suffix="s" disabled />
                   </Field>
-                  <Field
-                    label="Min claimable USDC"
-                    hint="Skip the cycle if claimable fees are below this — avoids burning gas on dust."
-                  >
-                    <NumberSuffix
-                      value={form.min_claim_usdc}
-                      onChange={(v) => update("min_claim_usdc", v)}
-                      suffix="USDC"
-                      min={0}
-                      step={0.1}
-                    />
+                  <Field label="Min claimable USDC" hint="Locked at 1 USDC during beta — avoids burning gas on dust.">
+                    <NumberSuffix value={form.min_claim_usdc} onChange={() => {}} suffix="USDC" disabled />
                   </Field>
                 </Section>
+
 
                 <Section title="Deployment">
                   <Field
@@ -660,6 +671,7 @@ function NumberSuffix({
   min,
   max,
   step,
+  disabled,
 }: {
   value: number;
   onChange: (v: number) => void;
@@ -667,6 +679,7 @@ function NumberSuffix({
   min?: number;
   max?: number;
   step?: number;
+  disabled?: boolean;
 }) {
   return (
     <div className="relative mt-1">
@@ -676,17 +689,24 @@ function NumberSuffix({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={cls + " mt-0 pr-14"}
+        className={cls + " mt-0 pr-14 disabled:cursor-not-allowed disabled:opacity-50"}
       />
       {suffix && (
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] font-semibold text-muted-foreground">
           {suffix}
         </span>
       )}
+      {disabled && (
+        <span className="pointer-events-none absolute inset-y-0 right-10 flex items-center text-muted-foreground/80">
+          <Lock className="h-3 w-3" />
+        </span>
+      )}
     </div>
   );
 }
+
 
 function ImageDrop({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
