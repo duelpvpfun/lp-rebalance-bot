@@ -129,7 +129,11 @@ async function sendInstructions(
   }
   if (!hasComputePrice) {
     // ~0.0001 SOL on a 400k CU tx — enough priority without draining SOL.
-    prepend.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_250_000 }));
+    prepend.push(
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 400_000),
+      }),
+    );
   }
   const finalIxs = [...prepend, ...ixs];
 
@@ -627,16 +631,45 @@ function mayHaveBroadcast(steps: StepResult[]): boolean {
   );
 }
 
-async function readNewestDevWalletSignatureTsSec(
-  conn: Connection,
-  wallet: PublicKey,
+export async function readLastCycleTsSec(
+  conn?: Connection,
+  wallet?: PublicKey,
 ): Promise<number | null> {
+  const c = conn ?? new Connection(rpcUrl(), "confirmed");
+  const w = wallet ?? loadKeypair().publicKey;
   try {
-    const sigs = await conn.getSignaturesForAddress(wallet, { limit: 1 }, "finalized");
+    // Newest dev-wallet signature of ANY kind, finalized only. Do not filter by
+    // program: claim/buy/LP/burn all prove the wallet acted and must cool down.
+    const sigs = await c.getSignaturesForAddress(w, { limit: 1 }, "finalized");
     return sigs[0]?.blockTime ?? null;
   } catch {
     return null;
   }
+}
+
+async function hardStartGate(
+  conn: Connection,
+  signer: Keypair,
+  nowMs = Date.now(),
+): Promise<{ step: StepResult; state: CycleState } | null> {
+  const lastSigSec = await readLastCycleTsSec(conn, signer.publicKey);
+  if (lastSigSec && nowMs - lastSigSec * 1000 < CYCLE_INTERVAL_SEC * 1000) {
+    const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
+    return {
+      step: { step: "skip", ok: true, info: { reason: "cooldown" } },
+      state: { ...cooldownState(cooldownUntilMs - CYCLE_INTERVAL_SEC * 1000), cooldownUntilMs },
+    };
+  }
+
+  const solBalance = (await conn.getBalance(signer.publicKey, "finalized")) / 1e9;
+  if (solBalance < MIN_SOL_BALANCE) {
+    return {
+      step: { step: "skip", ok: true, info: { reason: "low_sol" } },
+      state: abortCycleState(),
+    };
+  }
+
+  return null;
 }
 
 async function walletCooldownState(
@@ -644,7 +677,7 @@ async function walletCooldownState(
   wallet: PublicKey,
   nowMs = Date.now(),
 ): Promise<CycleState | null> {
-  const lastSigSec = await readNewestDevWalletSignatureTsSec(conn, wallet);
+  const lastSigSec = await readLastCycleTsSec(conn, wallet);
   if (!lastSigSec) return null;
   const cooldownUntilMs = (lastSigSec + CYCLE_INTERVAL_SEC) * 1000;
   return nowMs < cooldownUntilMs
