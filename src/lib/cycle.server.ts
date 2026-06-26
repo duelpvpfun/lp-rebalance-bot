@@ -878,9 +878,10 @@ async function stepLp(
   mint: string,
   tokenDecimals: number,
   spotPriceUsdcPerToken: number,
+  afterBroadcast?: (signature: string) => Promise<void>,
 ): Promise<{ results: StepResult[]; ok: boolean }> {
   const out: StepResult[] = [];
-  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, out);
+  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, out, afterBroadcast);
   return { results: out, ok };
 }
 
