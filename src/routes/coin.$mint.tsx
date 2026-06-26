@@ -31,6 +31,14 @@ type Coin = {
   liquidity_usdc?: number;
   liquidity_token?: number;
 };
+type Stats = {
+  price_usd?: number | null;
+  market_cap_usd?: number | null;
+  liquidity_usd?: number | null;
+  liquidity_usdc?: number | null;
+  liquidity_token?: number | null;
+  venue?: string | null;
+} | null;
 
 export const Route = createFileRoute("/coin/$mint")({
   component: CoinPage,
@@ -57,13 +65,15 @@ function CoinPage() {
         `${WORKER_BASE_PUBLIC}/coin?id=${encodeURIComponent(mint)}`,
       );
       if (!r.ok) throw new Error("Failed");
-      return (await r.json()) as { coin: Coin; activity: Activity[] };
+      return (await r.json()) as { coin: Coin; stats: Stats; activity: Activity[] };
     },
-    refetchInterval: 20_000,
-    staleTime: 10_000,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 
   const coin = data?.coin;
+  const stats = data?.stats ?? null;
+
   const activity = (data?.activity ?? []).slice().sort((a, b) => {
     const ta = a.created_at ? Date.parse(a.created_at) : 0;
     const tb = b.created_at ? Date.parse(b.created_at) : 0;
@@ -156,11 +166,12 @@ function CoinPage() {
 
             {/* stats block — same vibe as the home stats header */}
             <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Stat label="Market cap" value={fmtUsd(coin.market_cap_usd)} />
-              <Stat label="Liquidity" value={fmtUsd(coin.liquidity_usd)} />
-              <Stat label="USDC in LP" value={fmtNum(coin.liquidity_usdc)} />
-              <Stat label={`$${coin.symbol ?? "TOKEN"} in LP`} value={fmtNum(coin.liquidity_token)} />
+              <Stat label="Market cap" value={fmtUsd(stats?.market_cap_usd)} />
+              <Stat label="Liquidity" value={fmtUsd(stats?.liquidity_usd)} />
+              <Stat label="USDC in LP" value={fmtNum(stats?.liquidity_usdc)} />
+              <Stat label={`$${coin.symbol ?? "TOKEN"} in LP`} value={fmtNum(stats?.liquidity_token)} />
             </div>
+
 
             {/* dexscreener chart */}
             <div className="mt-6 overflow-hidden rounded-md border border-border bg-card/30">

@@ -7,13 +7,36 @@ import { ConnectWalletButton } from "@/components/ConnectWalletButton";
 
 const COMMUNITY_URL = "https://x.com/i/communities/2033361508042780851";
 
+type Stats = {
+  price_usd?: number | null;
+  market_cap_usd?: number | null;
+  liquidity_usd?: number | null;
+  liquidity_usdc?: number | null;
+  liquidity_token?: number | null;
+  venue?: string | null;
+} | null;
+
 type Coin = {
   mint: string;
   name?: string;
   symbol?: string;
   image_url?: string;
   imageUrl?: string;
+  stats?: Stats;
 };
+
+function fmtNum(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  if (a >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `${(n / 1e3).toFixed(2)}K`;
+  if (a >= 1) return n.toFixed(2);
+  return n.toPrecision(3);
+}
+const fmtUsd = (n?: number | null) =>
+  n == null || !Number.isFinite(n) ? "—" : `$${fmtNum(n)}`;
+
 
 export const Route = createFileRoute("/coins")({
   head: () => ({
@@ -38,8 +61,9 @@ function CoinsPage() {
       const arr: Coin[] = Array.isArray(j) ? j : j.coins ?? [];
       return arr;
     },
-    refetchInterval: 30_000,
-    staleTime: 15_000,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+
   });
 
   return (
@@ -126,6 +150,17 @@ function CoinsPage() {
                   <div className="text-xs text-muted-foreground">
                     ${c.symbol ?? "—"}
                   </div>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    <div className="rounded border border-border/60 bg-background/40 px-1.5 py-1">
+                      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">MCap</div>
+                      <div className="text-xs font-bold">{fmtUsd(c.stats?.market_cap_usd)}</div>
+                    </div>
+                    <div className="rounded border border-border/60 bg-background/40 px-1.5 py-1">
+                      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Liq</div>
+                      <div className="text-xs font-bold">{fmtUsd(c.stats?.liquidity_usd)}</div>
+                    </div>
+                  </div>
+
                 </Link>
               );
             })}
