@@ -10,7 +10,7 @@ import { cycleStatus, tick } from "@/lib/cycle.server";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-cron-secret",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-liquititty-live-timer",
 };
 
 async function status() {
