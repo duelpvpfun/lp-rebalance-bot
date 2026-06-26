@@ -420,7 +420,14 @@ function TxList() {
             <div className="flex items-center gap-3">
               <span className={`inline-block h-2 w-2 rounded-full ${t.success ? "bg-accent" : "bg-destructive"}`} />
               <div>
-                <div className="font-bold">{t.label}</div>
+                <div className="flex items-center gap-2 font-bold">
+                  {t.label}
+                  {t.blockTime != null && t.blockTime < REAL_LAUNCH_CUTOFF && (
+                    <span className="rounded-md border border-destructive/60 bg-destructive/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-destructive">
+                      TEST
+                    </span>
+                  )}
+                </div>
                 <RelativeTime t={t.blockTime} />
               </div>
             </div>
