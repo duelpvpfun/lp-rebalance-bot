@@ -114,11 +114,13 @@ function CoinPage() {
             <ConnectWalletButton />
             <Link
               to="/launch"
-              className="lp-glow inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground transition hover:scale-[1.03]"
+              className="lp-glow inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-accent px-3 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground transition hover:scale-[1.03] sm:px-4"
             >
               <Rocket className="h-3.5 w-3.5" />
-              launch a coin
+              <span className="hidden sm:inline">launch a coin</span>
+              <span className="sm:hidden">launch</span>
             </Link>
+
           </div>
         </div>
       </header>
@@ -204,7 +206,8 @@ function CoinPage() {
             {/* dexscreener chart — branding hidden via overlay */}
             <div className="mt-6 overflow-hidden rounded-md border border-border bg-card/30">
               {coin.pair_address ? (
-                <div className="relative h-[520px] w-full">
+                <div className="relative h-[360px] w-full sm:h-[520px]">
+
                   <iframe
                     title="chart"
                     src={`https://dexscreener.com/solana/${coin.pair_address}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1`}
@@ -228,14 +231,15 @@ function CoinPage() {
               <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-accent">
                 Dev wallet activity
               </h2>
-              <div className="overflow-hidden rounded-md border border-border">
+              <div className="overflow-x-auto rounded-md border border-border">
                 {activity.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">
                     no cycle activity yet
                   </div>
                 )}
                 {activity.length > 0 && (
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full min-w-[640px] text-left text-sm">
+
                     <thead className="bg-secondary/40 text-[11px] uppercase tracking-wider text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2">Step</th>

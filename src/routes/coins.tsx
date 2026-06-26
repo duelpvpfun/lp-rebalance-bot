@@ -69,24 +69,24 @@ function CoinsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-border/60">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-3 px-4 py-3">
-          <Link to="/launch" className="flex items-center gap-3">
-            <img src={logo} alt="liquititty" className="h-8 w-8 rounded-md" />
-            <span className="font-display text-lg">liquititty / coins</span>
+        <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-4">
+          <Link to="/launch" className="flex min-w-0 shrink items-center gap-2 sm:gap-3">
+            <img src={logo} alt="liquititty" className="h-8 w-8 shrink-0 rounded-md" />
+            <span className="hidden truncate font-display text-lg sm:inline">liquititty / coins</span>
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <a
               href={COMMUNITY_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent"
+              className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent sm:inline-flex"
             >
               <Users className="h-3 w-3" /> community
             </a>
             <ConnectWalletButton />
             <Link
               to="/launch"
-              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground"
+              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-accent px-3 py-2 text-xs font-bold uppercase tracking-wider text-accent-foreground sm:px-4"
             >
               <Rocket className="h-3.5 w-3.5" />
               launch
@@ -94,6 +94,7 @@ function CoinsPage() {
           </div>
         </div>
       </header>
+
 
       <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-10">
         <h1 className="font-display text-2xl">All launches</h1>

@@ -49,11 +49,11 @@ function Index() {
   const buyUrl = data.mint ? `https://pump.fun/coin/${data.mint}` : "https://pump.fun";
   return (
     <div className="min-h-screen">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <div className="flex items-center gap-3">
-          <img src={logo} alt="Liquititty logo" className="h-10 w-10 rounded-lg shadow-lg" />
-          <span className="font-display text-xl">LIQUITITTY</span>
-        </div>
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-4 sm:gap-4 sm:px-6 sm:py-6">
+        <Link to="/" className="flex min-w-0 shrink items-center gap-2 sm:gap-3">
+          <img src={logo} alt="Liquititty logo" className="h-9 w-9 shrink-0 rounded-lg shadow-lg sm:h-10 sm:w-10" />
+          <span className="hidden truncate font-display text-xl sm:inline">LIQUITITTY</span>
+        </Link>
         <nav className="hidden gap-8 text-sm md:flex">
           <a href="#how" className="opacity-80 hover:opacity-100">How it works</a>
           <a href="#activity" className="opacity-80 hover:opacity-100">Live activity</a>
@@ -61,12 +61,12 @@ function Index() {
           <Link to="/coins" className="opacity-80 hover:opacity-100">All coins</Link>
           <a href="#faq" className="opacity-80 hover:opacity-100">FAQ</a>
         </nav>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <CommunityIcon />
           <ConnectWalletButton />
           <Link
             to="/launch"
-            className="hidden items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-foreground shadow-[0_0_20px_-4px_var(--color-accent)] transition hover:scale-105 sm:inline-flex"
+            className="hidden items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-2 text-sm font-bold text-accent-foreground shadow-[0_0_20px_-4px_var(--color-accent)] transition hover:scale-105 sm:inline-flex"
           >
             <Rocket className="h-4 w-4" />
             Launch
@@ -76,12 +76,13 @@ function Index() {
             href={buyUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-lg transition hover:scale-105"
+            className="whitespace-nowrap rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-lg transition hover:scale-105 sm:px-5 sm:text-sm"
           >
             Buy
           </a>
         </div>
       </header>
+
 
       <Suspense fallback={<StatsBarSkeleton />}>
         <StatsBar />
@@ -134,12 +135,13 @@ function Index() {
             </a>
           </div>
         </div>
-        <div className="relative mx-auto">
+        <div className="relative mx-auto w-full max-w-[260px] md:max-w-md">
           <div className="absolute inset-0 -z-10 blur-3xl">
             <div className="h-full w-full rounded-full bg-accent/40" />
           </div>
-          <img src={logo} alt="Liquititty" className="w-full max-w-md rounded-3xl shadow-2xl" />
+          <img src={logo} alt="Liquititty" className="w-full rounded-3xl shadow-2xl" />
         </div>
+
       </section>
 
       <section id="how" className="mx-auto max-w-6xl px-6 py-20">
@@ -362,7 +364,7 @@ function NextCycleTimer() {
   }, [mounted, running, remaining, qc]);
 
   return (
-    <div className="flex h-[132px] w-[300px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur">
+    <div className="flex h-[132px] w-full max-w-[340px] flex-col justify-between rounded-2xl border border-border bg-card/60 px-5 py-4 backdrop-blur sm:w-[300px]">
       <div className="flex h-4 items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
         {(running || firing) && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent" />}
         <span className="truncate">{running ? "Cycle running" : firing ? "Firing now…" : "Next cycle in"}</span>
