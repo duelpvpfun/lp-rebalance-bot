@@ -1,4 +1,6 @@
-import { Buffer } from "buffer";
+import * as BufferModule from "buffer";
+
+const Buffer = (BufferModule as any).Buffer ?? (BufferModule as any).default?.Buffer;
 
 export function installBrowserPolyfills() {
   if (typeof globalThis === "undefined") return;
