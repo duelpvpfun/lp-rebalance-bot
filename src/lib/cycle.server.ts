@@ -925,10 +925,14 @@ export async function runCycleStep(state?: CycleState): Promise<{
   try {
     switch (currentPhase) {
       case "claim": {
+        let broadcastClaimedUsdc = 0;
+        let broadcastSpotPrice = 0;
         const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
           // Pre-advance immediately AFTER claim broadcasts. If the host times
           // out before confirmation returns, the next tick buys 35% of THIS
           // claim instead of broadcasting another claim.
+          broadcastClaimedUsdc = expectedClaimedUsdc;
+          broadcastSpotPrice = spotPriceUsdcPerToken;
           await persistCycleProgress({
             ...nextState,
             phase: "buy",
@@ -962,6 +966,8 @@ export async function runCycleStep(state?: CycleState): Promise<{
               ok: true,
               info: "claim tx was broadcast but confirmation timed out; advancing to buy instead of claiming again",
             });
+            nextState.claimedUsdc = broadcastClaimedUsdc;
+            nextState.spotPrice = broadcastSpotPrice;
             nextState.phase = "buy";
             nextState.attempts = 0;
             stepOk = true;
