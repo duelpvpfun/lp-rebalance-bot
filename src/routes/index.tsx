@@ -38,6 +38,8 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  const { data } = useSuspenseQuery(statsQuery);
+  const buyUrl = data.mint ? `https://pump.fun/coin/${data.mint}` : "https://pump.fun";
   return (
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -55,7 +57,7 @@ function Index() {
           <CommunityIcon />
           <a
             id="buy"
-            href="https://pump.fun"
+            href={buyUrl}
             target="_blank"
             rel="noreferrer"
             className="rounded-full bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-lg transition hover:scale-105"
@@ -86,7 +88,7 @@ function Index() {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
-              href="https://pump.fun"
+              href={buyUrl}
               target="_blank"
               rel="noreferrer"
               className="rounded-full bg-accent px-6 py-3 font-bold text-accent-foreground shadow-xl transition hover:scale-105"
@@ -439,14 +441,12 @@ function fmtUsd(n: number | null): string {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`;
   return `$${n.toFixed(2)}`;
 }
-function fmtNum(n: number | null, suffix: string): string {
+function fmtNum(n: number | null, _suffix?: string): string {
   if (n == null) return "—";
-  let v: string;
-  if (n >= 1_000_000_000) v = `${(n / 1_000_000_000).toFixed(2)}B`;
-  else if (n >= 1_000_000) v = `${(n / 1_000_000).toFixed(2)}M`;
-  else if (n >= 1_000) v = `${(n / 1_000).toFixed(2)}K`;
-  else v = n.toFixed(2);
-  return `${v} ${suffix}`;
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
+  return n.toFixed(2);
 }
 function short(s: string): string {
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
