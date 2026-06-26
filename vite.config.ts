@@ -40,7 +40,7 @@ export default defineConfig({
         "@pump-fun/pump-sdk",
         "@pump-fun/pump-swap-sdk",
         "@pump-fun/agent-payments-sdk",
-        /^@solana\//,
+        /^@solana\/(?!buffer-layout)/,
       ],
     },
   },
