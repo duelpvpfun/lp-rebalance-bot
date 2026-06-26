@@ -45,11 +45,12 @@ import {
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const BUYBACK_PCT = 0.35;
-const PRIORITY_FEE_SOL = 0.0005;
+const PRIORITY_FEE_SOL = 0.0001;
 const SLIPPAGE_BPS = 1500;
 const POOL_SLIPPAGE_PCT = 10;
 const MAX_LP_RETRIES = 6;
 const LP_SHRINK_FACTOR = 0.85;
+const MIN_SOL_BALANCE = 0.02;
 
 // Index for the bot-owned PumpSwap pool (the one we create + seed ourselves,
 // distinct from pump.fun's canonical pool created at graduation). Override via
@@ -127,7 +128,7 @@ async function sendInstructions(
     prepend.push(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
   }
   if (!hasComputePrice) {
-    // ~0.0005 SOL on a 400k CU tx — fine for our small claim/buy/LP txs.
+    // ~0.0001 SOL on a 400k CU tx — enough priority without draining SOL.
     prepend.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_250_000 }));
   }
   const finalIxs = [...prepend, ...ixs];
