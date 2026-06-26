@@ -208,25 +208,17 @@ function CoinPage() {
 
             {/* dexscreener chart — branding hidden via overlay */}
             <div className="mt-6 overflow-hidden rounded-md border border-border bg-card/30">
-              {coin.pair_address ? (
-                <div className="relative h-[360px] w-full sm:h-[520px]">
-
-                  <iframe
-                    title="chart"
-                    src={`https://dexscreener.com/solana/${coin.pair_address}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1`}
-                    className="block h-full w-full"
-                  />
-                  {/* mask dexscreener label/branding in the embed corner */}
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute left-0 top-0 h-9 w-44 bg-card"
-                  />
-                </div>
-              ) : (
-                <div className="grid h-[260px] place-items-center px-6 text-center text-sm text-muted-foreground">
-                  chart available once trading starts
-                </div>
-              )}
+              <div className="relative h-[360px] w-full sm:h-[520px]">
+                <iframe
+                  title="chart"
+                  src={`https://dexscreener.com/solana/${coin.pair_address ?? coin.mint}?embed=1&theme=dark&info=0&trades=0&chartLeftToolbar=0&chartDefaultOnMobile=1&header=0`}
+                  className="block h-full w-full"
+                />
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute left-0 top-0 h-9 w-44 bg-card"
+                />
+              </div>
             </div>
 
             <ClaimStatusBanner coin={coin} />
