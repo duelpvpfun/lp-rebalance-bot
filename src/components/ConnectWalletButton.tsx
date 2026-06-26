@@ -22,7 +22,7 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
         type="button"
         onClick={() => disconnect()}
         className={
-          "inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent " +
+          "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-accent/50 bg-accent/15 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent sm:px-3 " +
           className
         }
         title="Click to disconnect"
@@ -40,12 +40,13 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
         onClick={() => setOpen(true)}
         disabled={connecting}
         className={
-          "inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent hover:bg-accent/25 " +
+          "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-accent/50 bg-accent/15 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-accent hover:bg-accent/25 sm:px-3 " +
           className
         }
       >
         <Wallet className="h-3 w-3" />
-        {connecting ? "connecting…" : "connect wallet"}
+        <span className="hidden sm:inline">{connecting ? "connecting…" : "connect wallet"}</span>
+        <span className="sm:hidden">{connecting ? "…" : "connect"}</span>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
