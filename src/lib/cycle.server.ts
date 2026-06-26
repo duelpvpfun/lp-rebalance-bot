@@ -914,7 +914,18 @@ export async function runCycleStep(state?: CycleState): Promise<{
   try {
     switch (currentPhase) {
       case "claim": {
-        const r = await stepClaim(conn, signer, mint, tokenDecimals);
+        const r = await stepClaim(conn, signer, mint, tokenDecimals, async (expectedClaimedUsdc, spotPriceUsdcPerToken) => {
+          // Pre-advance before broadcasting claim. If claim lands but the host
+          // times out before returning, the next tick buys 35% of THIS claim
+          // instead of claiming again.
+          await persistCycleProgress({
+            ...nextState,
+            phase: "buy",
+            claimedUsdc: expectedClaimedUsdc,
+            spotPrice: spotPriceUsdcPerToken,
+            attempts: 0,
+          });
+        });
         steps = r.results;
         if (r.skip) {
           nextState = abortCycleState();
@@ -934,11 +945,21 @@ export async function runCycleStep(state?: CycleState): Promise<{
           }
           stepOk = true;
         } else {
-          // Claim failures/timeouts get exactly one try per minute. If it lands
-          // late, the next cycle sees an empty vault and skips; no claim spam.
-          steps.push({ step: "claim", ok: false, error: "claim failed — cooldown restarted" });
-          nextState = abortCycleState();
-          done = true;
+          if (mayHaveBroadcast(steps)) {
+            steps.push({
+              step: "claim_confirmation_unknown",
+              ok: true,
+              info: "claim tx was broadcast but confirmation timed out; advancing to buy instead of claiming again",
+            });
+            nextState.phase = "buy";
+            nextState.attempts = 0;
+            stepOk = true;
+          } else {
+            // Claim failures before broadcast get exactly one try per minute.
+            steps.push({ step: "claim", ok: false, error: "claim failed before broadcast — cooldown restarted" });
+            nextState = abortCycleState();
+            done = true;
+          }
         }
         break;
       }
