@@ -118,9 +118,14 @@ export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> 
   // STEP 1: claim
   const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   try {
+    // USDC-quoted pump.fun coin: must pass pool="pump" + mint so PumpPortal
+    // builds collect_creator_fee_v2 with quote_mint=USDC (otherwise it
+    // defaults to the WSOL path and sweeps an empty SOL vault).
     const txBuf = await pumpPortalLocal({
       publicKey: pubkey,
       action: "collectCreatorFee",
+      pool: "pump",
+      mint,
       priorityFee: PRIORITY_FEE_SOL,
     });
     const sig = await signAndSend(conn, signer, txBuf);
