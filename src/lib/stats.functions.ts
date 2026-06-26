@@ -152,8 +152,7 @@ async function fetchDex(mint: string): Promise<DexStats> {
   }
 }
 
-async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
-  // Look back further so we can filter down to just claim / buy / LP.
+async function fetchTxs(conn: Connection, wallet: string, mint: string): Promise<WalletTx[]> {
   const sigs = await conn.getSignaturesForAddress(new PublicKey(wallet), { limit: 40 });
   const parsed = await Promise.all(
     sigs.map((s) =>
@@ -163,10 +162,10 @@ async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
   const out: WalletTx[] = [];
   for (let i = 0; i < sigs.length; i++) {
     const s = sigs[i];
-    const tx = parsed[i];
+    const tx = parsed[i] as ParsedTx | null;
     if (!tx) continue;
     const pids = new Set<string>();
-    for (const ix of tx.transaction.message.instructions ?? []) {
+    for (const ix of tx.transaction?.message?.instructions ?? []) {
       const pid = (ix as { programId?: PublicKey }).programId?.toBase58();
       if (pid) pids.add(pid);
     }
@@ -176,7 +175,7 @@ async function fetchTxs(conn: Connection, wallet: string): Promise<WalletTx[]> {
         if (pid) pids.add(pid);
       }
     }
-    const label = labelFor([...pids]);
+    const label = classify(tx, pids, wallet, mint);
     if (!label) continue;
     out.push({
       signature: s.signature,
