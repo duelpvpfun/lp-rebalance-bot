@@ -33,7 +33,7 @@ const POOL_SLIPPAGE_PCT = 10;
 const MAX_LP_RETRIES = 6;
 const LP_SHRINK_FACTOR = 0.85;
 
-export const CYCLE_INTERVAL_SEC = 300;
+export const CYCLE_INTERVAL_SEC = 60; // TEMP: set to 60 for testing, restore to 300 (5 min) later
 
 export type StepResult = {
   step: string;
