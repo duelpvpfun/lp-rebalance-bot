@@ -366,7 +366,8 @@ async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
 // Supabase fan-out. One real fetch per STATS_CACHE_TTL_MS per worker isolate;
 // concurrent callers share the in-flight promise. Keeps credits + RPC quota
 // flat regardless of traffic.
-const STATS_CACHE_TTL_MS = 15_000;
+const STATS_CACHE_TTL_MS = 60_000;
+const STATS_STALE_GRACE_MS = 10 * 60_000; // serve stale up to 10 min if upstream chokes
 let statsCache: { at: number; payload: StatsPayload } | null = null;
 let statsInflight: Promise<StatsPayload> | null = null;
 
@@ -402,20 +403,28 @@ export const getStats = createServerFn({ method: "GET" }).handler(
     if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS) {
       return statsCache.payload;
     }
-    if (statsInflight) return statsInflight;
+    if (statsInflight) {
+      // Don't make extra visitors wait on the upstream fan-out — hand them the
+      // last known good payload while the single in-flight refresh runs.
+      if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS + STATS_STALE_GRACE_MS) {
+        return statsCache.payload;
+      }
+      return statsInflight;
+    }
     statsInflight = (async () => {
       try {
         const payload = await computeStats();
         statsCache = { at: Date.now(), payload };
         return payload;
       } catch (err) {
-        // Serve stale on error so visitors never see a blank page.
         if (statsCache) return statsCache.payload;
         throw err;
       } finally {
         statsInflight = null;
       }
     })();
-    return statsInflight;
+    // First-ever request: must await. Subsequent requests within TTL use cache above.
+    if (!statsCache) return statsInflight;
+    return statsCache.payload;
   },
 );
