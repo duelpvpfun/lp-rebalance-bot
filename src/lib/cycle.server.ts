@@ -145,7 +145,10 @@ async function sendInstructions(
   // landing txs reliably on mainnet.
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
 
-  const deadlineMs = Date.now() + 75_000; // ~75s before we give up
+  // 22s confirm window — keeps every step well under the serverless 30s host
+  // timeout. Each tick runs exactly one step, so we don't need the long 75s
+  // wait we used when claim+buy+LP+burn ran in a single request.
+  const deadlineMs = Date.now() + 22_000;
   let lastErr: unknown;
   while (Date.now() < deadlineMs) {
     try {
@@ -155,17 +158,17 @@ async function sendInstructions(
         if (s.err) throw new Error(`tx failed: ${JSON.stringify(s.err)}`);
         return sig;
       }
-      // not yet — rebroadcast and wait
       await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
     } catch (e) {
       lastErr = e;
     }
-    await new Promise((r) => setTimeout(r, 2_000));
+    await new Promise((r) => setTimeout(r, 1_500));
   }
   throw new Error(
-    `tx ${sig} did not confirm within 75s${lastErr ? `: ${(lastErr as Error).message}` : ""}`,
+    `tx ${sig} did not confirm within 22s${lastErr ? `: ${(lastErr as Error).message}` : ""}`,
   );
 }
+
 
 
 async function getTokenDecimals(conn: Connection, mint: string): Promise<number> {
