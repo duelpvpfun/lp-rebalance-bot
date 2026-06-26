@@ -448,22 +448,17 @@ function TxList() {
 }
 
 function RelativeTime({ t }: { t: number | null }) {
-  const mounted = useMounted();
   const now = useNow(15_000);
   if (!t) return <div className="text-xs text-muted-foreground">pending</div>;
-  // Render an absolute timestamp during SSR / first paint to avoid hydration drift.
-  const absolute = new Date(t * 1000).toISOString().slice(11, 16) + " UTC";
-  if (!mounted) {
-    return <div className="text-xs text-muted-foreground" suppressHydrationWarning>{absolute}</div>;
-  }
-  const diff = now / 1000 - t;
+  const diff = Math.max(0, now / 1000 - t);
   let label: string;
   if (diff < 60) label = `${Math.floor(diff)}s ago`;
   else if (diff < 3600) label = `${Math.floor(diff / 60)}m ago`;
   else if (diff < 86400) label = `${Math.floor(diff / 3600)}h ago`;
-  else label = new Date(t * 1000).toLocaleDateString();
+  else label = `${Math.floor(diff / 86400)}d ago`;
   return <div className="text-xs text-muted-foreground" suppressHydrationWarning>{label}</div>;
 }
+
 
 function TxListSkeleton() {
   return <div className="mt-8 h-64 animate-pulse rounded-2xl border border-border bg-card/40" />;
