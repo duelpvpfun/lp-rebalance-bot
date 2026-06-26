@@ -586,7 +586,7 @@ async function persistCycleState(state: CycleState): Promise<void> {
       phase: state.phase,
       cycle_start_at: state.cycleStartMs > 0 ? new Date(state.cycleStartMs).toISOString() : null,
       cooldown_until: new Date(state.cooldownUntilMs).toISOString(),
-      claim_guard_until: new Date(Math.max(state.claimGuardUntilMs, state.cooldownUntilMs)).toISOString(),
+      claim_guard_until: state.claimGuardUntilMs > 0 ? new Date(state.claimGuardUntilMs).toISOString() : null,
       claimed_usdc: state.claimedUsdc,
       spot_price: state.spotPrice,
       attempts: state.attempts,
@@ -605,7 +605,7 @@ async function persistCycleProgress(state: CycleState): Promise<void> {
       phase: state.phase,
       cycle_start_at: state.cycleStartMs > 0 ? new Date(state.cycleStartMs).toISOString() : null,
       cooldown_until: new Date(state.cooldownUntilMs).toISOString(),
-      claim_guard_until: new Date(Math.max(state.claimGuardUntilMs, state.cooldownUntilMs)).toISOString(),
+      claim_guard_until: state.claimGuardUntilMs > 0 ? new Date(state.claimGuardUntilMs).toISOString() : null,
       claimed_usdc: state.claimedUsdc,
       spot_price: state.spotPrice,
       attempts: state.attempts,
@@ -1090,7 +1090,6 @@ async function runCycleStep(state?: CycleState): Promise<{
     // truth show "running" and prevents any caller from seeing an expired idle
     // row while the claim step is preparing.
     nextState.cooldownUntilMs = Date.now() + CYCLE_INTERVAL_SEC * 1000;
-    nextState.claimGuardUntilMs = nextState.cooldownUntilMs;
     await persistCycleProgress(nextState);
   }
   const currentPhase = nextState.phase;
