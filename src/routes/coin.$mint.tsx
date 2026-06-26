@@ -229,6 +229,8 @@ function CoinPage() {
               )}
             </div>
 
+            <ClaimStatusBanner coin={coin} />
+
             {/* activity */}
             <section className="mt-8">
               <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-accent">
