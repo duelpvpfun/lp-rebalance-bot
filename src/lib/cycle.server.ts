@@ -409,391 +409,464 @@ async function burnLpTokens(
   }
 }
 
-/**
- * Pre-graduation cycle:
- *   1) claim USDC creator fees from the bonding-curve creator vault (V2 — the
- *      quote-mint-aware claim PumpPortal does NOT build for USDC coins),
- *   2) buy 35% of the claimed USDC worth of token on the bonding curve, then
- *   3) add the bought token + the remaining USDC into our own PumpSwap pool
- *      (created on first run). The bonding curve has no LP, but a standalone
- *      PumpSwap pool can be created/seeded at any time — so liquidity grows
- *      every cycle even before graduation.
- */
-async function runBondingCurveCycle(
+/* ============================================================================
+ * STEP-BASED CYCLE STATE MACHINE
+ *
+ * Serverless hosts (Cloudflare Workers, edge functions) kill requests after
+ * ~30s. The old runCycle() did claim → buy → LP → burn in a single request and
+ * ran 40–60s, so it got killed mid-flight and only the claim ever landed.
+ *
+ * Now each tick() call advances exactly ONE step of the current cycle. The
+ * frontend (and the in-process scheduler) polls /api/public/tick every ~5s, so
+ * a full cycle completes in ~4 ticks (~20s) regardless of host timeouts. The
+ * order is fixed: claim → buy → lp → burn, then back to idle for the cooldown.
+ *
+ * A new cycle's claim only starts after the previous cycle's burn confirms.
+ * State lives in this module — Workers reuse isolates so it survives across
+ * ticks; if an isolate dies mid-cycle we reset to idle and the next tick
+ * starts fresh.
+ * ========================================================================== */
+
+type Phase = "claim" | "buy" | "lp" | "burn";
+
+const MAX_STEP_ATTEMPTS = 4;
+
+let cycleState: {
+  phase: Phase;
+  cycleStartMs: number;
+  lastBurnMs: number;
+  claimedUsdc: number;
+  spotPrice: number;
+  attempts: number;
+} = {
+  phase: "claim",
+  cycleStartMs: 0,
+  lastBurnMs: 0,
+  claimedUsdc: 0,
+  spotPrice: 0,
+  attempts: 0,
+};
+
+function resetCycleAfterBurn() {
+  cycleState = {
+    phase: "claim",
+    cycleStartMs: 0,
+    lastBurnMs: Date.now(),
+    claimedUsdc: 0,
+    spotPrice: 0,
+    attempts: 0,
+  };
+}
+
+function abortCycle() {
+  // Same as post-burn reset but lastBurnMs unchanged so cooldown isn't extended
+  // by a fail-fast. Skips (nothing to claim) and hard failures both come here.
+  cycleState = {
+    phase: "claim",
+    cycleStartMs: 0,
+    lastBurnMs: cycleState.lastBurnMs || Date.now(),
+    claimedUsdc: 0,
+    spotPrice: 0,
+    attempts: 0,
+  };
+}
+
+/* ----------------- STEP 1: claim USDC creator fees ----------------- */
+async function stepClaim(
   conn: Connection,
   signer: Keypair,
   mint: string,
   tokenDecimals: number,
-  steps: StepResult[],
-): Promise<{ ok: boolean; steps: StepResult[] }> {
-  const pubkey = signer.publicKey.toBase58();
+): Promise<{
+  results: StepResult[];
+  claimedUsdc: number;
+  spotPriceUsdcPerToken: number;
+  skip: boolean;
+  ok: boolean;
+}> {
+  const out: StepResult[] = [];
+  const mintPk = new PublicKey(mint);
+  const usdcPk = new PublicKey(USDC_MINT);
+  const user = signer.publicKey;
+  const pubkey = user.toBase58();
+
+  const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
+
+  // Decide venue by reading the bonding curve once.
+  const pumpSdk = new PumpSdk();
+  const bcInfo = await conn.getAccountInfo(bondingCurvePda(mintPk));
+  const bondingCurve = bcInfo ? pumpSdk.decodeBondingCurveNullable(bcInfo) : null;
+  const isCurve = !!(bondingCurve && !bondingCurve.complete);
+
+  // Compute spot price for first-run pool seeding (USDC per token).
+  let spotPriceUsdcPerToken = 0;
+  if (isCurve && bondingCurve) {
+    const vToken = Number(bondingCurve.virtualTokenReserves.toString()) / 10 ** tokenDecimals;
+    const vUsdc = Number(bondingCurve.virtualQuoteReserves.toString()) / 1e6;
+    spotPriceUsdcPerToken = vToken > 0 ? vUsdc / vToken : 0;
+  } else {
+    spotPriceUsdcPerToken = await fetchAmmSpotPrice(conn, mint).catch(() => 0);
+  }
+
+  out.push({ step: "phase", ok: true, info: { phase: isCurve ? "bonding_curve" : "amm" } });
+
+  try {
+    if (isCurve) {
+      const creator = bondingCurve!.creator;
+      if (!creator.equals(user)) {
+        out.push({
+          step: "claim",
+          ok: false,
+          error: `dev wallet ${pubkey} is not the token creator ${creator.toBase58()} — cannot claim`,
+        });
+        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: false };
+      }
+      const creatorVaultAuthority = creatorVaultPda(creator);
+      const creatorVaultUsdcAta = getAssociatedTokenAddressSync(
+        usdcPk,
+        creatorVaultAuthority,
+        true,
+        TOKEN_PROGRAM_ID,
+      );
+      const claimableUsdc = await getTokenAccountUiBalance(conn, creatorVaultUsdcAta);
+      out.push({
+        step: "claimable_usdc_vault",
+        ok: true,
+        info: { usdc: claimableUsdc, vault: creatorVaultUsdcAta.toBase58() },
+      });
+      if (claimableUsdc < 0.000001) {
+        out.push({ step: "skip", ok: true, info: "no USDC creator rewards in bonding-curve vault" });
+        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
+      }
+      const onlinePumpSdk = new OnlinePumpSdk(conn);
+      const claimIxs = await onlinePumpSdk.collectCoinCreatorFeeV2Instructions(
+        creator,
+        usdcPk,
+        TOKEN_PROGRAM_ID,
+        user,
+      );
+      const sig = await sendInstructions(conn, signer, claimIxs);
+      out.push({
+        step: "claim",
+        ok: true,
+        signature: sig,
+        info: { quoteMint: USDC_MINT, venue: "bonding_curve" },
+      });
+    } else {
+      const offlineSdk = new PumpAmmSdk();
+      const onlineSdk = new OnlinePumpAmmSdk(conn);
+      const quoteTokenProgram = TOKEN_PROGRAM_ID;
+      const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
+      const pool = await onlineSdk.fetchPool(poolPk);
+      const coinCreator = pool.coinCreator;
+      if (!coinCreator.equals(user)) {
+        out.push({
+          step: "claim",
+          ok: false,
+          error: `dev wallet ${pubkey} is not the pool coinCreator ${coinCreator.toBase58()} — cannot claim`,
+        });
+        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: false };
+      }
+      const coinCreatorVaultAuthority = coinCreatorVaultAuthorityPda(coinCreator);
+      const coinCreatorVaultAta = coinCreatorVaultAtaPda(
+        coinCreatorVaultAuthority,
+        usdcPk,
+        quoteTokenProgram,
+      );
+      const coinCreatorTokenAccount = getAssociatedTokenAddressSync(
+        usdcPk,
+        coinCreator,
+        true,
+        quoteTokenProgram,
+      );
+      const vaultUsdc = await getTokenAccountUiBalance(conn, coinCreatorVaultAta);
+      out.push({
+        step: "claimable_usdc_vault",
+        ok: true,
+        info: { usdc: vaultUsdc, vault: coinCreatorVaultAta.toBase58() },
+      });
+      if (vaultUsdc < 0.000001) {
+        out.push({ step: "skip", ok: true, info: "no USDC creator rewards in PumpSwap vault" });
+        return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: true, ok: true };
+      }
+      const [coinCreatorVaultAtaAccountInfo, coinCreatorTokenAccountInfo] =
+        await conn.getMultipleAccountsInfo([coinCreatorVaultAta, coinCreatorTokenAccount]);
+      const claimIxs = await offlineSdk.collectCoinCreatorFee(
+        {
+          coinCreator,
+          quoteMint: usdcPk,
+          quoteTokenProgram,
+          coinCreatorVaultAuthority,
+          coinCreatorVaultAta,
+          coinCreatorTokenAccount,
+          coinCreatorVaultAtaAccountInfo,
+          coinCreatorTokenAccountInfo,
+        },
+        user,
+      );
+      const ixs: TransactionInstruction[] = [
+        createAssociatedTokenAccountIdempotentInstruction(
+          user,
+          coinCreatorTokenAccount,
+          coinCreator,
+          usdcPk,
+          quoteTokenProgram,
+        ),
+        ...claimIxs,
+      ];
+      const sig = await sendInstructions(conn, signer, ixs);
+      out.push({
+        step: "claim",
+        ok: true,
+        signature: sig,
+        info: { quoteMint: USDC_MINT, venue: "amm" },
+      });
+    }
+  } catch (e) {
+    out.push({ step: "claim", ok: false, error: (e as Error).message });
+    return { results: out, claimedUsdc: 0, spotPriceUsdcPerToken, skip: false, ok: false };
+  }
+
+  // Claim confirmed → USDC is in our ATA. Compute the delta to size the buy.
+  const usdcAfter = await getTokenUiBalance(conn, pubkey, USDC_MINT);
+  const claimedUsdc = Math.max(0, usdcAfter - usdcBefore);
+  out.push({ step: "claimed_amount", ok: true, info: { usdc: claimedUsdc } });
+  return { results: out, claimedUsdc, spotPriceUsdcPerToken, skip: false, ok: true };
+}
+
+/* ----------------- STEP 2: buy 35% of claimed USDC into token ----------------- */
+async function stepBuy(
+  conn: Connection,
+  signer: Keypair,
+  mint: string,
+  tokenDecimals: number,
+  claimedUsdc: number,
+): Promise<{ results: StepResult[]; ok: boolean; skip: boolean }> {
+  const out: StepResult[] = [];
+  if (claimedUsdc < 0.5) {
+    out.push({ step: "skip", ok: true, info: "claimed USDC too small to buy" });
+    return { results: out, ok: false, skip: true };
+  }
+  const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
+  const spendUsdcRaw = new BN(Math.floor(buybackUsdcUi * 1e6).toString());
   const mintPk = new PublicKey(mint);
   const usdcPk = new PublicKey(USDC_MINT);
   const user = signer.publicKey;
 
-  // The token may be Token-2022; USDC is always legacy SPL Token.
-  const tokenProgram = await getMintTokenProgram(conn, mintPk);
-
   const pumpSdk = new PumpSdk();
-  const onlinePumpSdk = new OnlinePumpSdk(conn);
-
-  // The creator vault is keyed by the bonding curve's on-chain `creator`. Only
-  // that wallet can claim the fees. Read it and verify the dev wallet matches.
   const bcInfo = await conn.getAccountInfo(bondingCurvePda(mintPk));
   const bondingCurve = bcInfo ? pumpSdk.decodeBondingCurveNullable(bcInfo) : null;
-  if (!bondingCurve) {
-    steps.push({ step: "claim", ok: false, error: "bonding curve account not found" });
-    return { ok: false, steps };
-  }
-  const creator = bondingCurve.creator;
-  if (!creator.equals(user)) {
-    steps.push({
-      step: "claim",
-      ok: false,
-      error:
-        `dev wallet ${pubkey} is not the token creator ${creator.toBase58()} — ` +
-        `creator rewards are paid to the creator wallet, so this wallet cannot claim them. ` +
-        `Set DEV_WALLET_PRIVATE_KEY to the token's creator wallet.`,
-    });
-    return { ok: false, steps };
-  }
+  const isCurve = !!(bondingCurve && !bondingCurve.complete);
 
-  // STEP 1: claim USDC creator fees (quote-mint-aware V2 claim).
-  const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
   try {
-    // Read the *USDC* creator-fee vault directly. (getCreatorVaultBalance*
-    // reads the native/SOL vault, which is 0 for USDC-quoted coins — that's a
-    // display-only quirk; the V2 claim below still targets the right ATA.)
-    const creatorVaultAuthority = creatorVaultPda(creator);
-    const creatorVaultUsdcAta = getAssociatedTokenAddressSync(
-      usdcPk,
-      creatorVaultAuthority,
-      true,
-      TOKEN_PROGRAM_ID,
-    );
-    const claimableUsdc = await getTokenAccountUiBalance(conn, creatorVaultUsdcAta);
-    steps.push({
-      step: "claimable_usdc_vault",
-      ok: true,
-      info: { usdc: claimableUsdc, vault: creatorVaultUsdcAta.toBase58() },
-    });
-
-    if (claimableUsdc < 0.000001) {
-      steps.push({
-        step: "skip",
-        ok: true,
-        info: "no USDC creator rewards in bonding-curve vault",
+    if (isCurve) {
+      const tokenProgram = await getMintTokenProgram(conn, mintPk);
+      const onlinePumpSdk = new OnlinePumpSdk(conn);
+      const global = await onlinePumpSdk.fetchGlobal();
+      const feeConfig = await onlinePumpSdk.fetchFeeConfig().catch(() => null);
+      const buyState = await onlinePumpSdk.fetchBuyState(mintPk, user, tokenProgram);
+      const mintSupply = bondingCurve!.tokenTotalSupply ?? null;
+      const expectedTokens = getBuyTokenAmountFromSolAmount({
+        global,
+        feeConfig,
+        mintSupply,
+        bondingCurve: buyState.bondingCurve,
+        amount: spendUsdcRaw,
+        quoteMint: usdcPk,
       });
-      return { ok: true, steps };
-    }
-
-    const claimIxs = await onlinePumpSdk.collectCoinCreatorFeeV2Instructions(
-      creator,
-      usdcPk,
-      TOKEN_PROGRAM_ID,
-      user,
-    );
-    const ixs: TransactionInstruction[] = [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 250_000),
-      }),
-      ...claimIxs,
-    ];
-    const sig = await sendInstructions(conn, signer, ixs);
-    steps.push({ step: "claim", ok: true, signature: sig, info: { quoteMint: USDC_MINT } });
-  } catch (e) {
-    steps.push({ step: "claim", ok: false, error: (e as Error).message });
-    return { ok: false, steps };
-  }
-
-  await new Promise((r) => setTimeout(r, 4000));
-  const usdcAfter = await getTokenUiBalance(conn, pubkey, USDC_MINT);
-  const claimedUsdc = Math.max(0, usdcAfter - usdcBefore);
-  steps.push({ step: "claimed_amount", ok: true, info: { usdc: claimedUsdc } });
-
-  if (claimedUsdc < 0.5) {
-    steps.push({ step: "skip", ok: true, info: "claimed USDC too small, abort" });
-    return { ok: true, steps };
-  }
-
-  // STEP 2: buy 35% of the claimed USDC worth of token on the bonding curve.
-  // (The other 65% stays as USDC to pair into the LP in STEP 3.)
-  const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
-  const spendUsdcRaw = new BN(Math.floor(buybackUsdcUi * 1e6).toString());
-  let spotPriceUsdcPerToken = 0;
-  try {
-    const global = await onlinePumpSdk.fetchGlobal();
-    const feeConfig = await onlinePumpSdk.fetchFeeConfig().catch(() => null);
-    const buyState = await onlinePumpSdk.fetchBuyState(mintPk, user, tokenProgram);
-    const mintSupply = bondingCurve.tokenTotalSupply ?? null;
-
-    // Spot price for seeding our own pool (USDC per token, from virtual reserves).
-    const vToken = Number(bondingCurve.virtualTokenReserves.toString()) / 10 ** tokenDecimals;
-    const vUsdc = Number(bondingCurve.virtualQuoteReserves.toString()) / 1e6;
-    spotPriceUsdcPerToken = vToken > 0 ? vUsdc / vToken : 0;
-
-    // Estimate how many tokens `spendUsdcRaw` USDC buys at the current curve.
-    const expectedTokens = getBuyTokenAmountFromSolAmount({
-      global,
-      feeConfig,
-      mintSupply,
-      bondingCurve: buyState.bondingCurve,
-      amount: spendUsdcRaw,
-      quoteMint: usdcPk,
-    });
-
-    const buyIxs = await pumpSdk.buyV2Instructions({
-      global,
-      bondingCurveAccountInfo: buyState.bondingCurveAccountInfo,
-      bondingCurve: buyState.bondingCurve,
-      associatedUserAccountInfo: buyState.associatedUserAccountInfo,
-      mint: mintPk,
-      user,
-      amount: expectedTokens,
-      quoteAmount: spendUsdcRaw,
-      slippage: SLIPPAGE_BPS / 100,
-      tokenProgram,
-      quoteTokenProgram: TOKEN_PROGRAM_ID,
-    });
-
-    const ixs: TransactionInstruction[] = [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 350_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 350_000),
-      }),
-      ...buyIxs,
-    ];
-    const sig = await sendInstructions(conn, signer, ixs);
-    steps.push({
-      step: "swap",
-      ok: true,
-      signature: sig,
-      info: {
-        spentUsdc: buybackUsdcUi,
-        estTokens: Number(expectedTokens.toString()) / 10 ** tokenDecimals,
-        venue: "bonding_curve",
-      },
-    });
-  } catch (e) {
-    steps.push({ step: "swap", ok: false, error: (e as Error).message });
-    return { ok: false, steps };
-  }
-
-  await new Promise((r) => setTimeout(r, 4000));
-
-  // STEP 3: add the bought token + remaining USDC into our own PumpSwap pool.
-  const lpOk = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, steps);
-
-  // STEP 4: burn the LP tokens we just received so the liquidity is locked forever.
-  if (lpOk) {
-    await new Promise((r) => setTimeout(r, 4000));
-    await burnLpTokens(conn, signer, mint, steps);
-  }
-  return { ok: steps.every((s) => s.ok || s.step.startsWith("addLiquidity_retry")), steps };
-}
-
-export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
-  const steps: StepResult[] = [];
-  const mint = process.env.TOKEN_MINT_ADDRESS;
-  if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
-
-  const signer = loadKeypair();
-  const pubkey = signer.publicKey.toBase58();
-  const conn = new Connection(rpcUrl(), "confirmed");
-  const tokenDecimals = await getTokenDecimals(conn, mint);
-  // Decide which venue we're on. Before a pump.fun coin graduates there is NO
-  // PumpSwap pool — the bonding curve itself is the liquidity. All the
-  // PumpSwap-based steps below would throw. So we check the bonding curve's
-  // `complete` flag and run the curve-phase cycle (claim USDC fees -> buy on
-  // the curve) until it graduates, then switch to the AMM cycle (claim -> buy
-  // -> add LP) automatically.
-  try {
-    const pumpSdk = new PumpSdk();
-    const bcInfo = await conn.getAccountInfo(bondingCurvePda(new PublicKey(mint)));
-    const bondingCurve = bcInfo ? pumpSdk.decodeBondingCurveNullable(bcInfo) : null;
-    if (bondingCurve && !bondingCurve.complete) {
-      steps.push({
-        step: "phase",
+      const buyIxs = await pumpSdk.buyV2Instructions({
+        global,
+        bondingCurveAccountInfo: buyState.bondingCurveAccountInfo,
+        bondingCurve: buyState.bondingCurve,
+        associatedUserAccountInfo: buyState.associatedUserAccountInfo,
+        mint: mintPk,
+        user,
+        amount: expectedTokens,
+        quoteAmount: spendUsdcRaw,
+        slippage: SLIPPAGE_BPS / 100,
+        tokenProgram,
+        quoteTokenProgram: TOKEN_PROGRAM_ID,
+      });
+      const sig = await sendInstructions(conn, signer, buyIxs);
+      out.push({
+        step: "swap",
         ok: true,
+        signature: sig,
         info: {
-          phase: "bonding_curve",
-          note: "token not graduated yet — claiming fees and buying on the curve to push toward graduation",
+          spentUsdc: buybackUsdcUi,
+          estTokens: Number(expectedTokens.toString()) / 10 ** tokenDecimals,
+          venue: "bonding_curve",
         },
       });
-      return await runBondingCurveCycle(conn, signer, mint, tokenDecimals, steps);
-    }
-    steps.push({ step: "phase", ok: true, info: { phase: "amm" } });
-  } catch (e) {
-    // If the curve probe fails, fall through to the AMM path (best effort).
-    steps.push({ step: "phase_probe", ok: false, error: (e as Error).message });
-  }
-  // STEP 1: claim PumpSwap USDC creator fees directly with the official SDK.
-  // PumpPortal's collectCreatorFee path was building/claiming the old WSOL vault,
-  // which produced successful-looking txs but 0 USDC claimed for this USDC pair.
-  //
-  // The creator-fee vault is derived from the pool's on-chain `coinCreator`,
-  // NOT from whoever signs the tx. We read the canonical pool and use that
-  // value, so the claim always targets the right vault. If the dev wallet is
-  // not the registered creator, the claimed USDC would land in someone else's
-  // ATA — we detect that and fail loudly instead of silently claiming 0.
-  const usdcBefore = await getTokenUiBalance(conn, pubkey, USDC_MINT);
-  try {
-    const offlineSdk = new PumpAmmSdk();
-    const onlineSdk = new OnlinePumpAmmSdk(conn);
-    const quoteMint = new PublicKey(USDC_MINT);
-    const quoteTokenProgram = TOKEN_PROGRAM_ID;
-
-    const poolPk = canonicalPumpPoolPda(new PublicKey(mint), quoteMint);
-    const pool = await onlineSdk.fetchPool(poolPk);
-    const coinCreator = pool.coinCreator;
-
-    if (!coinCreator.equals(signer.publicKey)) {
-      throw new Error(
-        `dev wallet ${pubkey} is not the pool coinCreator ${coinCreator.toBase58()} — ` +
-          `creator rewards are paid to the creator wallet, so this wallet cannot claim them. ` +
-          `Set DEV_WALLET_PRIVATE_KEY to the token's creator wallet.`,
+    } else {
+      const onlineSdk = new OnlinePumpAmmSdk(conn);
+      const offlineSdk = new PumpAmmSdk();
+      const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
+      const swapState = await onlineSdk.swapSolanaState(poolPk, user);
+      if (!swapState.pool.baseMint.equals(mintPk)) {
+        throw new Error(
+          `pool base mint mismatch: pool.base=${swapState.pool.baseMint.toBase58()} expected=${mint}`,
+        );
+      }
+      const buyIxs: TransactionInstruction[] = await offlineSdk.buyQuoteInput(
+        swapState,
+        spendUsdcRaw,
+        SLIPPAGE_BPS / 100,
       );
+      const sig = await sendInstructions(conn, signer, buyIxs);
+      out.push({
+        step: "swap",
+        ok: true,
+        signature: sig,
+        info: { spentUsdc: buybackUsdcUi, venue: "amm" },
+      });
     }
+    return { results: out, ok: true, skip: false };
+  } catch (e) {
+    out.push({ step: "swap", ok: false, error: (e as Error).message });
+    return { results: out, ok: false, skip: false };
+  }
+}
 
-    const coinCreatorVaultAuthority = coinCreatorVaultAuthorityPda(coinCreator);
-    const coinCreatorVaultAta = coinCreatorVaultAtaPda(
-      coinCreatorVaultAuthority,
-      quoteMint,
-      quoteTokenProgram,
-    );
-    const coinCreatorTokenAccount = getAssociatedTokenAddressSync(
-      quoteMint,
-      coinCreator,
-      true,
-      quoteTokenProgram,
-    );
+/* ----------------- STEP 3: add liquidity to own pool ----------------- */
+async function stepLp(
+  conn: Connection,
+  signer: Keypair,
+  mint: string,
+  tokenDecimals: number,
+  spotPriceUsdcPerToken: number,
+): Promise<{ results: StepResult[]; ok: boolean }> {
+  const out: StepResult[] = [];
+  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPriceUsdcPerToken, out);
+  return { results: out, ok };
+}
 
-    const vaultUsdc = await getTokenAccountUiBalance(conn, coinCreatorVaultAta);
+/* ----------------- STEP 4: burn all LP tokens ----------------- */
+async function stepBurn(
+  conn: Connection,
+  signer: Keypair,
+  mint: string,
+): Promise<{ results: StepResult[]; ok: boolean }> {
+  const out: StepResult[] = [];
+  await burnLpTokens(conn, signer, mint, out);
+  const ok = out.every((s) => s.ok);
+  return { results: out, ok };
+}
+
+/* ----------------- One-step driver (called by tick) ----------------- */
+export async function runCycleStep(): Promise<{
+  ok: boolean;
+  phase: Phase;
+  done: boolean;
+  steps: StepResult[];
+}> {
+  const mint = process.env.TOKEN_MINT_ADDRESS;
+  if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
+  const signer = loadKeypair();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const tokenDecimals = await getTokenDecimals(conn, mint);
+
+  if (cycleState.cycleStartMs === 0) cycleState.cycleStartMs = Date.now();
+  const currentPhase = cycleState.phase;
+  let steps: StepResult[] = [];
+  let stepOk = false;
+  let done = false;
+
+  try {
+    switch (currentPhase) {
+      case "claim": {
+        const r = await stepClaim(conn, signer, mint, tokenDecimals);
+        steps = r.results;
+        if (r.skip) {
+          abortCycle();
+          done = true;
+          stepOk = r.ok;
+          break;
+        }
+        if (r.ok) {
+          cycleState.claimedUsdc = r.claimedUsdc;
+          cycleState.spotPrice = r.spotPriceUsdcPerToken;
+          if (r.claimedUsdc < 0.5) {
+            abortCycle();
+            done = true;
+          } else {
+            cycleState.phase = "buy";
+            cycleState.attempts = 0;
+          }
+          stepOk = true;
+        } else {
+          cycleState.attempts++;
+        }
+        break;
+      }
+      case "buy": {
+        const r = await stepBuy(conn, signer, mint, tokenDecimals, cycleState.claimedUsdc);
+        steps = r.results;
+        if (r.skip) {
+          // can't buy → still try to LP whatever we hold next tick.
+          cycleState.phase = "lp";
+          cycleState.attempts = 0;
+          stepOk = true;
+        } else if (r.ok) {
+          cycleState.phase = "lp";
+          cycleState.attempts = 0;
+          stepOk = true;
+        } else {
+          cycleState.attempts++;
+        }
+        break;
+      }
+      case "lp": {
+        const r = await stepLp(conn, signer, mint, tokenDecimals, cycleState.spotPrice);
+        steps = r.results;
+        if (r.ok) {
+          cycleState.phase = "burn";
+          cycleState.attempts = 0;
+          stepOk = true;
+        } else {
+          cycleState.attempts++;
+        }
+        break;
+      }
+      case "burn": {
+        const r = await stepBurn(conn, signer, mint);
+        steps = r.results;
+        if (r.ok) {
+          resetCycleAfterBurn();
+          done = true;
+          stepOk = true;
+        } else {
+          cycleState.attempts++;
+        }
+        break;
+      }
+    }
+  } catch (e) {
+    steps.push({ step: currentPhase, ok: false, error: (e as Error).message });
+    cycleState.attempts++;
+  }
+
+  // Safety: stop spinning on a step that keeps failing.
+  if (!stepOk && cycleState.attempts >= MAX_STEP_ATTEMPTS) {
     steps.push({
-      step: "claimable_usdc_vault",
-      ok: true,
-      info: { usdc: vaultUsdc, vault: coinCreatorVaultAta.toBase58() },
+      step: currentPhase,
+      ok: false,
+      error: `step "${currentPhase}" failed ${cycleState.attempts}x — aborting cycle`,
     });
-
-    if (vaultUsdc < 0.000001) {
-      steps.push({ step: "skip", ok: true, info: "no USDC creator rewards in PumpSwap vault" });
-      return { ok: true, steps };
-    }
-
-    const [coinCreatorVaultAtaAccountInfo, coinCreatorTokenAccountInfo] =
-      await conn.getMultipleAccountsInfo([coinCreatorVaultAta, coinCreatorTokenAccount]);
-
-    const claimIxs = await offlineSdk.collectCoinCreatorFee(
-      {
-        coinCreator,
-        quoteMint,
-        quoteTokenProgram,
-        coinCreatorVaultAuthority,
-        coinCreatorVaultAta,
-        coinCreatorTokenAccount,
-        coinCreatorVaultAtaAccountInfo,
-        coinCreatorTokenAccountInfo,
-      },
-      signer.publicKey,
-    );
-
-    const ixs: TransactionInstruction[] = [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 250_000),
-      }),
-      createAssociatedTokenAccountIdempotentInstruction(
-        signer.publicKey,
-        coinCreatorTokenAccount,
-        coinCreator,
-        quoteMint,
-        quoteTokenProgram,
-      ),
-      ...claimIxs,
-    ];
-
-    const sig = await sendInstructions(conn, signer, ixs);
-    steps.push({ step: "claim", ok: true, signature: sig, info: { quoteMint: USDC_MINT } });
-  } catch (e) {
-    steps.push({ step: "claim", ok: false, error: (e as Error).message });
-    return { ok: false, steps };
+    abortCycle();
+    done = true;
   }
 
-  await new Promise((r) => setTimeout(r, 4000));
-  const usdcAfter = await getTokenUiBalance(conn, pubkey, USDC_MINT);
-  const claimedUsdc = Math.max(0, usdcAfter - usdcBefore);
-  steps.push({ step: "claimed_amount", ok: true, info: { usdc: claimedUsdc } });
+  return { ok: stepOk, phase: currentPhase, done, steps };
+}
 
-  if (claimedUsdc < 0.5) {
-    steps.push({ step: "skip", ok: true, info: "claimed USDC too small, abort" });
-    return { ok: true, steps };
-  }
-
-  // STEP 2: buy back token with 35% of the claimed USDC, directly on the
-  // canonical PumpSwap pool (same pool we LP into). Using the PumpSwap SDK
-  // keeps the whole cycle on a single venue with no third-party aggregator.
-  const buybackUsdcUi = claimedUsdc * BUYBACK_PCT;
-  const buybackUsdcRaw = Math.floor(buybackUsdcUi * 1e6);
-  try {
-    const mintPk = new PublicKey(mint);
-    const usdcPk = new PublicKey(USDC_MINT);
-    const userPk = signer.publicKey;
-
-    const poolPk = canonicalPumpPoolPda(mintPk, usdcPk);
-    const onlineSdk = new OnlinePumpAmmSdk(conn);
-    const offlineSdk = new PumpAmmSdk();
-    const swapState = await onlineSdk.swapSolanaState(poolPk, userPk);
-
-    if (!swapState.pool.baseMint.equals(mintPk)) {
-      throw new Error(
-        `pool base mint mismatch: pool.base=${swapState.pool.baseMint.toBase58()} expected=${mint}`,
-      );
-    }
-
-    // quote (USDC) in -> base (token) out, with slippage tolerance.
-    const buyIxs: TransactionInstruction[] = await offlineSdk.buyQuoteInput(
-      swapState,
-      new BN(buybackUsdcRaw.toString()),
-      SLIPPAGE_BPS / 100,
-    );
-
-    const ixs: TransactionInstruction[] = [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 350_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.floor((PRIORITY_FEE_SOL * 1e9 * 1e6) / 350_000),
-      }),
-      ...buyIxs,
-    ];
-
-    const sig = await sendInstructions(conn, signer, ixs);
-    steps.push({ step: "swap", ok: true, signature: sig, info: { spentUsdc: buybackUsdcUi } });
-  } catch (e) {
-    steps.push({ step: "swap", ok: false, error: (e as Error).message });
-    return { ok: false, steps };
-  }
-
-  await new Promise((r) => setTimeout(r, 4000));
-
-  // STEP 3: add the bought token + remaining USDC into our own PumpSwap pool
-  // (created on first run, reused thereafter). Post-bond we use the live AMM
-  // price as the seed price; if the pool already exists the seed price is
-  // ignored and the deposit follows the pool's current ratio.
-  let spotPrice = 0;
-  try {
-    const dexPrice = await fetchAmmSpotPrice(conn, mint);
-    spotPrice = dexPrice;
-  } catch {
-    spotPrice = 0;
-  }
-  const ok = await addToOwnPool(conn, signer, mint, tokenDecimals, spotPrice, steps);
-
-  // STEP 4: burn the LP tokens we just received so the liquidity is locked forever.
-  if (ok) {
-    await new Promise((r) => setTimeout(r, 4000));
-    await burnLpTokens(conn, signer, mint, steps);
-  }
-  return { ok, steps };
+/**
+ * Back-compat shim. The old monolithic runCycle is gone; callers that want a
+ * whole cycle should call tick() repeatedly. This just runs one step.
+ */
+export async function runCycle(): Promise<{ ok: boolean; steps: StepResult[] }> {
+  const r = await runCycleStep();
+  return { ok: r.ok, steps: r.steps };
 }
 
 /**
@@ -819,89 +892,75 @@ async function fetchAmmSpotPrice(conn: Connection, mint: string): Promise<number
   }
 }
 
-/**
- * Single-flight lock + on-chain timestamp gate so the built-in scheduler
- * (polled by the website) can safely fire `runCycle` at most once every
- * CYCLE_INTERVAL_SEC even with multiple concurrent visitors.
- *
- * The lock is in-memory per Worker isolate; the timestamp gate is the real
- * source of truth (read from the dev wallet's recent signatures).
- */
-let inFlight: Promise<{ ok: boolean; steps: StepResult[] }> | null = null;
-let lastRunAtMs = 0;
+/* ============================================================================
+ * TICK — public entry. Runs at most one step per call.
+ *   - "cooldown": idle, waiting for CYCLE_INTERVAL_SEC since last burn.
+ *   - "in_flight": another tick is already running a step.
+ *   - ran=true: a step executed; phase/done describe progress.
+ * ========================================================================== */
 
-const PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
-const PUMP_FUN = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
-const JUPITER_V6 = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
-
-async function readLastCycleTsSec(): Promise<number | null> {
-  try {
-    const signer = loadKeypair();
-    const conn = new Connection(rpcUrl(), "confirmed");
-    const sigs = await conn.getSignaturesForAddress(signer.publicKey, { limit: 25 });
-    const parsed = await Promise.all(
-      sigs.map((s) =>
-        conn
-          .getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 })
-          .catch(() => null),
-      ),
-    );
-    for (let i = 0; i < sigs.length; i++) {
-      const s = sigs[i];
-      const tx = parsed[i];
-      if (!tx || s.err) continue;
-      const pids = new Set<string>();
-      for (const ix of tx.transaction.message.instructions ?? []) {
-        const pid = (ix as { programId?: PublicKey }).programId?.toBase58();
-        if (pid) pids.add(pid);
-      }
-      for (const inner of tx.meta?.innerInstructions ?? []) {
-        for (const ix of inner.instructions ?? []) {
-          const pid = (ix as { programId?: PublicKey }).programId?.toBase58();
-          if (pid) pids.add(pid);
-        }
-      }
-      if (pids.has(PUMP_AMM) || pids.has(PUMP_FUN) || pids.has(JUPITER_V6)) {
-        return s.blockTime ?? null;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+let inFlight: Promise<{
+  ok: boolean;
+  phase: Phase;
+  done: boolean;
+  steps: StepResult[];
+}> | null = null;
 
 export type TickResult =
-  | { ran: true; ok: boolean; steps: StepResult[]; secondsUntilNext: number }
-  | { ran: false; reason: "cooldown" | "in_flight"; secondsUntilNext: number };
+  | {
+      ran: true;
+      ok: boolean;
+      phase: Phase;
+      done: boolean;
+      nextPhase: Phase | "idle";
+      steps: StepResult[];
+      secondsUntilNext: number;
+    }
+  | {
+      ran: false;
+      reason: "cooldown" | "in_flight";
+      phase: Phase | "idle";
+      secondsUntilNext: number;
+    };
 
 export async function tick(): Promise<TickResult> {
   const now = Date.now();
-
   if (inFlight) {
-    return { ran: false, reason: "in_flight", secondsUntilNext: CYCLE_INTERVAL_SEC };
+    return { ran: false, reason: "in_flight", phase: cycleState.phase, secondsUntilNext: 3 };
+  }
+  // Cooldown only gates the START of a new cycle. Mid-cycle ticks always run.
+  const atStartOfCycle = cycleState.cycleStartMs === 0;
+  if (atStartOfCycle && cycleState.lastBurnMs > 0) {
+    const sinceBurnSec = (now - cycleState.lastBurnMs) / 1000;
+    if (sinceBurnSec < CYCLE_INTERVAL_SEC) {
+      return {
+        ran: false,
+        reason: "cooldown",
+        phase: "idle",
+        secondsUntilNext: Math.ceil(CYCLE_INTERVAL_SEC - sinceBurnSec),
+      };
+    }
   }
 
-  const lastChainSec = await readLastCycleTsSec();
-  const lastSec = Math.max(lastRunAtMs / 1000, lastChainSec ?? 0);
-  const elapsed = now / 1000 - lastSec;
-  if (lastSec > 0 && elapsed < CYCLE_INTERVAL_SEC) {
-    return {
-      ran: false,
-      reason: "cooldown",
-      secondsUntilNext: Math.ceil(CYCLE_INTERVAL_SEC - elapsed),
-    };
-  }
-
-  lastRunAtMs = now;
-  inFlight = runCycle();
+  inFlight = runCycleStep();
   try {
-    const result = await inFlight;
-    return { ran: true, ok: result.ok, steps: result.steps, secondsUntilNext: CYCLE_INTERVAL_SEC };
+    const r = await inFlight;
+    const nextPhase: Phase | "idle" = r.done ? "idle" : cycleState.phase;
+    const secondsUntilNext = r.done ? CYCLE_INTERVAL_SEC : 4;
+    return {
+      ran: true,
+      ok: r.ok,
+      phase: r.phase,
+      done: r.done,
+      nextPhase,
+      steps: r.steps,
+      secondsUntilNext,
+    };
   } finally {
     inFlight = null;
   }
 }
+
 
 /**
  * Server-side scheduler. Starts a single setInterval (per server isolate) that
