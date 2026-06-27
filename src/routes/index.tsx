@@ -14,11 +14,12 @@ const REAL_LAUNCH_CUTOFF = 1782446614;
 const statsQuery = queryOptions({
   queryKey: ["stats"],
   queryFn: () => getStats(),
-  // Backend caches 60s in memory; poll faster so new dev-wallet txs and the
-  // live cycle phase surface quickly without burning extra credits.
-  refetchInterval: 15_000,
+  // Backend caches stats for 60s across all server isolates (Supabase-backed
+  // shared cache), so polling faster than that just burns bandwidth without
+  // surfacing fresher data. Keep client polling aligned with the cache TTL.
+  refetchInterval: 60_000,
   refetchIntervalInBackground: false,
-  staleTime: 10_000,
+  staleTime: 30_000,
 });
 
 export const Route = createFileRoute("/")({
