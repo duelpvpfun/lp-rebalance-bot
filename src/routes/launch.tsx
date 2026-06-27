@@ -346,57 +346,73 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
     );
   }
 
+  const MAX_TERMINAL = 12;
+  const terminalCoins = sorted.slice(0, MAX_TERMINAL);
+  const olderCoins = sorted.slice(MAX_TERMINAL);
+
   return (
-    <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {sorted.map((c) => {
-        const img = c.image_url ?? c.imageUrl;
-        const dev = c.deployer_wallet ?? c.deployerWallet ?? c.dev_wallet;
-        return (
-          <Link
-            key={c.mint}
-            to="/coin/$mint"
-            params={{ mint: c.mint }}
-            className="pf-card group flex items-start gap-3 rounded-md border border-border bg-card/40 p-3 transition hover:border-accent"
-          >
-            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
-              {img ? (
-                <img
-                  src={img}
-                  alt={c.name ?? c.symbol ?? c.mint}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              ) : (
-                <span className="text-muted-foreground">?</span>
-              )}
-            </div>
-            <div className="min-w-0 flex-1 text-xs leading-relaxed">
-              <div className="truncate text-sm font-bold text-foreground group-hover:text-accent">
-                {c.name ?? c.symbol ?? "Unnamed"}{" "}
-                <span className="font-normal text-muted-foreground">${c.symbol ?? "—"}</span>
+    <div>
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {terminalCoins.map((c) => {
+          const img = c.image_url ?? c.imageUrl;
+          const dev = c.deployer_wallet ?? c.deployerWallet ?? c.dev_wallet;
+          return (
+            <Link
+              key={c.mint}
+              to="/coin/$mint"
+              params={{ mint: c.mint }}
+              className="pf-card group flex items-start gap-3 rounded-md border border-border bg-card/40 p-3 transition hover:border-accent"
+            >
+              <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
+                {img ? (
+                  <img
+                    src={img}
+                    alt={c.name ?? c.symbol ?? c.mint}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <span className="text-muted-foreground">?</span>
+                )}
               </div>
-              <div className="text-muted-foreground">
-                mcap: <span className="font-bold text-accent">{fmtUsd(c.stats?.market_cap_usd)}</span>
-                {"  ·  "}
-                liq: <span className="font-bold text-foreground">{fmtUsd(c.stats?.liquidity_usd)}</span>
-              </div>
-              {dev && (
-                <div className="font-mono text-[10px] text-muted-foreground/80">
-                  dev: {dev.slice(0, 4)}…{dev.slice(-4)}
+              <div className="min-w-0 flex-1 text-xs leading-relaxed">
+                <div className="truncate text-sm font-bold text-foreground group-hover:text-accent">
+                  {c.name ?? c.symbol ?? "Unnamed"}{" "}
+                  <span className="font-normal text-muted-foreground">${c.symbol ?? "—"}</span>
                 </div>
-              )}
-              <div className="font-mono text-[10px] text-muted-foreground/80">
-                ca: {c.mint.slice(0, 4)}…{c.mint.slice(-4)}
+                <div className="text-muted-foreground">
+                  mcap: <span className="font-bold text-accent">{fmtUsd(c.stats?.market_cap_usd)}</span>
+                  {"  ·  "}
+                  liq: <span className="font-bold text-foreground">{fmtUsd(c.stats?.liquidity_usd)}</span>
+                </div>
+                {dev && (
+                  <div className="font-mono text-[10px] text-muted-foreground/80">
+                    dev: {dev.slice(0, 4)}…{dev.slice(-4)}
+                  </div>
+                )}
+                <div className="font-mono text-[10px] text-muted-foreground/80">
+                  ca: {c.mint.slice(0, 4)}…{c.mint.slice(-4)}
+                </div>
               </div>
-            </div>
+            </Link>
+          );
+        })}
+      </div>
+      {olderCoins.length > 0 && (
+        <div className="mt-4 text-center">
+          <Link
+            to="/coins"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-4 py-2 text-xs font-medium text-muted-foreground transition hover:border-accent hover:text-accent"
+          >
+            {olderCoins.length} older coin{olderCoins.length === 1 ? "" : "s"} →
           </Link>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }
