@@ -284,6 +284,7 @@ type TerminalCoin = {
 };
 
 function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "mcap" }) {
+  const [page, setPage] = useState(1);
   const { data, isLoading, error } = useQuery({
     queryKey: ["launchpad-coins"],
     queryFn: async () => {
@@ -296,6 +297,8 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
     refetchInterval: 15_000,
     staleTime: 10_000,
   });
+
+  useEffect(() => { setPage(1); }, [query, sort]);
 
   const ts = (c: TerminalCoin) => {
     const v = c.created_at ?? c.createdAt;
