@@ -420,48 +420,43 @@ async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
   }
 }
 
-// In-memory cache so every visitor doesn't trigger a fresh Helius/DexScreener/
-// Supabase fan-out. One real fetch per STATS_CACHE_TTL_MS per worker isolate;
-// concurrent callers share the in-flight promise. Keeps credits + RPC quota
-// flat regardless of traffic.
+// Two-tier cache to keep Helius/DexScreener/Supabase fan-out flat regardless
+// of traffic OR how many serverless isolates are warm:
+//   1. Per-isolate in-memory cache (fast, no DB hit on hot paths).
+//   2. Shared Supabase row (so a brand-new isolate doesn't refetch upstream
+//      if another isolate has already refreshed within the TTL window).
+// Result: at most ~1 upstream refresh per STATS_CACHE_TTL_MS across the entire
+// fleet, no matter how many concurrent visitors are polling.
 const STATS_CACHE_TTL_MS = 60_000;
 const STATS_STALE_GRACE_MS = 10 * 60_000; // serve stale up to 10 min if upstream chokes
+const STATS_CACHE_KEY = "homepage_stats_v1";
 let statsCache: { at: number; payload: StatsPayload } | null = null;
 let statsInflight: Promise<StatsPayload> | null = null;
 
-export async function computeStats(): Promise<StatsPayload> {
-  const mint = process.env.TOKEN_MINT_ADDRESS;
-  if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
-  const devWallet = loadPubkey();
-  const conn = new Connection(rpcUrl(), "confirmed");
-  const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
-    withTimeout(fetchDex(mint), 9_000, "fetchDex").catch(() => ({
-      priceUsd: null,
-      marketCapUsd: null,
-      liquidityUsd: null,
-      liquidityToken: null,
-      liquidityUsdc: null,
-      pairUrl: null,
-      dex: null,
-    } satisfies DexStats)),
-    withTimeout(fetchOnchainPool(conn, mint), 10_000, "fetchOnchainPool").catch(() => ({} as Partial<DexStats>)),
-    withTimeout(fetchTxs(conn, devWallet, mint), 12_000, "fetchTxs").catch(() => []),
-    withTimeout(fetchCycleRuntime(), 5_000, "fetchCycleRuntime").catch(() => ({ phase: "idle", cycleStartAt: null, cooldownUntil: null } as const)),
-  ]);
+async function readSharedCache(): Promise<{ at: number; payload: StatsPayload } | null> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("stats_cache")
+      .select("payload, updated_at")
+      .eq("key", STATS_CACHE_KEY)
+      .maybeSingle();
+    if (error || !data) return null;
+    return { at: Date.parse(data.updated_at), payload: data.payload as StatsPayload };
+  } catch {
+    return null;
+  }
+}
 
-
-  const dex: DexStats = {
-    priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
-    marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
-    liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
-    liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
-    liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
-    pairUrl: dexRaw.pairUrl,
-    dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
-  };
-
-  const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
-  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60, cycleRuntime };
+async function writeSharedCache(payload: StatsPayload): Promise<void> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin
+      .from("stats_cache")
+      .upsert({ key: STATS_CACHE_KEY, payload: payload as unknown as Record<string, unknown>, updated_at: new Date().toISOString() });
+  } catch {
+    // Cache write failure is non-fatal — next request will just retry.
+  }
 }
 
 export async function getCachedStats(): Promise<StatsPayload> {
@@ -469,15 +464,40 @@ export async function getCachedStats(): Promise<StatsPayload> {
   if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS) {
     return statsCache.payload;
   }
+
+  // Before doing real upstream work, check the shared Supabase cache. A peer
+  // isolate may have already refreshed within the TTL.
+  const shared = await readSharedCache();
+  if (shared && now - shared.at < STATS_CACHE_TTL_MS) {
+    statsCache = shared;
+    return shared.payload;
+  }
+
   if (statsInflight) {
-    // One refresh is already running. Reuse it instead of serving the same
-    // stale payload forever; the homepage query keeps the old UI visible while
-    // this request resolves.
     if (statsCache && now - statsCache.at < STATS_CACHE_TTL_MS + STATS_STALE_GRACE_MS) {
       return statsInflight.catch(() => statsCache!.payload);
     }
+    if (shared) {
+      return statsInflight.catch(() => shared.payload);
+    }
     return statsInflight;
   }
+  statsInflight = (async () => {
+    try {
+      const payload = await computeStats();
+      statsCache = { at: Date.now(), payload };
+      await writeSharedCache(payload);
+      return payload;
+    } catch (err) {
+      if (statsCache) return statsCache.payload;
+      if (shared) return shared.payload;
+      throw err;
+    } finally {
+      statsInflight = null;
+    }
+  })();
+  return statsInflight;
+}
   statsInflight = (async () => {
     try {
       const payload = await computeStats();
