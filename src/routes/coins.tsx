@@ -140,6 +140,12 @@ function CoinsPage() {
                           src={img}
                           alt={c.name ?? c.symbol ?? c.mint}
                           className="h-full w-full object-cover"
+                          loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                          }}
                         />
                       ) : (
                         <div className="grid h-full w-full place-items-center text-muted-foreground">?</div>
