@@ -420,6 +420,41 @@ async function fetchCycleRuntime(): Promise<StatsPayload["cycleRuntime"]> {
   }
 }
 
+export async function computeStats(): Promise<StatsPayload> {
+  const mint = process.env.TOKEN_MINT_ADDRESS;
+  if (!mint) throw new Error("TOKEN_MINT_ADDRESS missing");
+  const devWallet = loadPubkey();
+  const conn = new Connection(rpcUrl(), "confirmed");
+  const [dexRaw, onchain, txs, cycleRuntime] = await Promise.all([
+    withTimeout(fetchDex(mint), 9_000, "fetchDex").catch(() => ({
+      priceUsd: null,
+      marketCapUsd: null,
+      liquidityUsd: null,
+      liquidityToken: null,
+      liquidityUsdc: null,
+      pairUrl: null,
+      dex: null,
+    } satisfies DexStats)),
+    withTimeout(fetchOnchainPool(conn, mint), 10_000, "fetchOnchainPool").catch(() => ({} as Partial<DexStats>)),
+    withTimeout(fetchTxs(conn, devWallet, mint), 12_000, "fetchTxs").catch(() => []),
+    withTimeout(fetchCycleRuntime(), 5_000, "fetchCycleRuntime").catch(() => ({ phase: "idle", cycleStartAt: null, cooldownUntil: null } as const)),
+  ]);
+
+  const dex: DexStats = {
+    priceUsd: onchain.priceUsd ?? dexRaw.priceUsd,
+    marketCapUsd: onchain.marketCapUsd ?? dexRaw.marketCapUsd,
+    liquidityUsd: onchain.liquidityUsd ?? dexRaw.liquidityUsd,
+    liquidityToken: onchain.liquidityToken ?? dexRaw.liquidityToken,
+    liquidityUsdc: onchain.liquidityUsdc ?? dexRaw.liquidityUsdc,
+    pairUrl: dexRaw.pairUrl,
+    dex: dexRaw.dex ?? (onchain.liquidityUsd != null ? "pumpswap" : null),
+  };
+
+  const lastCycleAt = txs.find((t) => t.success)?.blockTime ?? null;
+  return { mint, devWallet, dex, txs, lastCycleAt, cycleIntervalSec: 60, cycleRuntime };
+}
+
+
 // Two-tier cache to keep Helius/DexScreener/Supabase fan-out flat regardless
 // of traffic OR how many serverless isolates are warm:
 //   1. Per-isolate in-memory cache (fast, no DB hit on hot paths).
