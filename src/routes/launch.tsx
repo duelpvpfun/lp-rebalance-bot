@@ -284,6 +284,7 @@ type TerminalCoin = {
 };
 
 function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "mcap" }) {
+  const [page, setPage] = useState(1);
   const { data, isLoading, error } = useQuery({
     queryKey: ["launchpad-coins"],
     queryFn: async () => {
@@ -296,6 +297,8 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
     refetchInterval: 15_000,
     staleTime: 10_000,
   });
+
+  useEffect(() => { setPage(1); }, [query, sort]);
 
   const ts = (c: TerminalCoin) => {
     const v = c.created_at ?? c.createdAt;
@@ -346,9 +349,11 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
     );
   }
 
-  const MAX_TERMINAL = 12;
-  const terminalCoins = sorted.slice(0, MAX_TERMINAL);
-  const olderCoins = sorted.slice(MAX_TERMINAL);
+  const PAGE_SIZE = 12;
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const terminalCoins = sorted.slice(start, start + PAGE_SIZE);
 
   return (
     <div>
@@ -403,14 +408,27 @@ function TerminalList({ query, sort }: { query: string; sort: "bump" | "new" | "
           );
         })}
       </div>
-      {olderCoins.length > 0 && (
-        <div className="mt-4 text-center">
-          <Link
-            to="/coins"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-4 py-2 text-xs font-medium text-muted-foreground transition hover:border-accent hover:text-accent"
+      {totalPages > 1 && (
+        <div className="mt-6 flex items-center justify-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="rounded-md border border-border bg-card/40 px-3 py-1.5 font-medium text-muted-foreground transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground"
           >
-            {olderCoins.length} older coin{olderCoins.length === 1 ? "" : "s"} →
-          </Link>
+            ← prev
+          </button>
+          <span className="font-mono text-muted-foreground">
+            page {currentPage} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="rounded-md border border-border bg-card/40 px-3 py-1.5 font-medium text-muted-foreground transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground"
+          >
+            next →
+          </button>
         </div>
       )}
     </div>
