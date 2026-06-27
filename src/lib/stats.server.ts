@@ -488,7 +488,7 @@ async function writeSharedCache(payload: StatsPayload): Promise<void> {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await supabaseAdmin
       .from("stats_cache")
-      .upsert({ key: STATS_CACHE_KEY, payload: payload as unknown as Record<string, unknown>, updated_at: new Date().toISOString() });
+      .upsert({ key: STATS_CACHE_KEY, payload: payload as unknown as never, updated_at: new Date().toISOString() });
   } catch {
     // Cache write failure is non-fatal — next request will just retry.
   }
