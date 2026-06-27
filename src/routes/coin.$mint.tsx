@@ -152,7 +152,17 @@ function CoinPage() {
             <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center">
               <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-secondary/40 ring-1 ring-border">
                 {img ? (
-                  <img src={img} alt={coin.name} className="h-full w-full object-cover" />
+                  <img
+                    src={img}
+                    alt={coin.name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                    }}
+                  />
                 ) : null}
               </div>
               <div className="min-w-0 flex-1">

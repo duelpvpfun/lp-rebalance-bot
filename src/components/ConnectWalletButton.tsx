@@ -62,6 +62,8 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
                 (w.name === "Phantom" && ((window as any).phantom?.solana || (window as any).solana?.isPhantom)) ||
                 (w.name === "Solflare" && (window as any).solflare)
               ));
+              const isMobile = typeof navigator !== "undefined" &&
+                /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
               return (
                 <button
                   key={w.name}
@@ -70,6 +72,18 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
                   onClick={async () => {
                     try {
                       if (!installed) {
+                        // On mobile, the wallet "extension" lives inside the
+                        // wallet's own in-app browser. Deep-link there instead
+                        // of telling users to install something they already have.
+                        if (isMobile) {
+                          const here = window.location.href;
+                          const ref = window.location.origin;
+                          const url = w.name === "Phantom"
+                            ? `https://phantom.app/ul/browse/${encodeURIComponent(here)}?ref=${encodeURIComponent(ref)}`
+                            : `https://solflare.com/ul/v1/browse/${encodeURIComponent(here)}?ref=${encodeURIComponent(ref)}`;
+                          window.location.href = url;
+                          return;
+                        }
                         window.open(w.installUrl, "_blank", "noopener,noreferrer");
                         toast.info(`${w.name} not detected — opening install page`);
                         return;
@@ -89,7 +103,7 @@ export function ConnectWalletButton({ className = "" }: { className?: string }) 
                   )}
                   <span className="font-semibold">{w.name}</span>
                   <span className="ml-auto text-xs text-muted-foreground">
-                    {installed ? "Installed" : "Not detected"}
+                    {installed ? "Installed" : isMobile ? "Open in app" : "Not detected"}
                   </span>
                 </button>
               );
