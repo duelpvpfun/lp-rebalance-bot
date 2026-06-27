@@ -498,20 +498,3 @@ export async function getCachedStats(): Promise<StatsPayload> {
   })();
   return statsInflight;
 }
-  statsInflight = (async () => {
-    try {
-      const payload = await computeStats();
-      statsCache = { at: Date.now(), payload };
-      return payload;
-    } catch (err) {
-      if (statsCache) return statsCache.payload;
-      throw err;
-    } finally {
-      statsInflight = null;
-    }
-  })();
-  // In the serverless runtime, unawaited background work can be cancelled when
-  // the response ends. Await stale refreshes so market cap + activity actually
-  // advance after the TTL instead of getting stuck on the old cache forever.
-  return statsInflight;
-}
